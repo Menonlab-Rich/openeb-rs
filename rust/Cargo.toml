@@ -12,3 +12,6 @@ regex = "1.11.1"
 
 [dependencies]
 
+[lib]
+name = "openeb_rs"
+path = "src/lib.rs"

@@ -525,3 +525,21 @@ foreach(comp ${cpack_all_components})
         )
     endif()
 endforeach()
+
+# -----------------------------------------------------------------------------
+# Custom target for the Rust build
+#
+# This target aggregates all the specific libraries needed by the Rust crate,
+# allowing them to be built with a single command without triggering the
+# default 'ALL' or 'install' targets.
+# -----------------------------------------------------------------------------
+add_custom_target(rust_dependencies)
+
+add_dependencies(rust_dependencies
+    metavision_hal
+    metavision_psee_hw_layer
+    metavision_sdk_base
+    metavision_sdk_core
+    metavision_sdk_stream
+    metavision_sdk_ui
+)
