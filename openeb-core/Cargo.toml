@@ -4,3 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.100"
+thiserror = {version = "2.0.18"}
+macros = { path="../macros/" }
+log = "0.4.29"
+crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
+paste = "1.0.15"
