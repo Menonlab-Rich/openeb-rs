@@ -1,0 +1,11 @@
+[package]
+name = "openeb-device-file"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+regex = "1.12.3"
+thiserror = "2.0.18"
+openeb-core = { path = "../openeb-core/" }
+macros = { path = "../macros/" }
+crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
