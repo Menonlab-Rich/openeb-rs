@@ -1,3 +1,4 @@
+use crate::hal::decoders::evt3::PooledBuffer;
 use crate::hal::types::{EventCD, EventExtTrigger};
 
 use crate::hal::errors::{
@@ -267,8 +268,6 @@ pub trait AntiFlickerFacility {
 pub trait BaseDecoderFacility {
     fn subscribe_to_protocol_violation(&mut self) -> Receiver<SharedError>;
 
-    fn unsubscribe_to_protocol_violation(&mut self) -> bool;
-
     property! {
         ro raw_event_size_bytes: u8;
     }
@@ -321,9 +320,8 @@ pub trait ERCModuleFacility {
 }
 
 pub trait EventDecoderFacility {
-    fn add_event_buffer_callback(&mut self, callback: CbRo<EventSlice>) -> FacilityResult<usize>;
-    fn remove_event_buffer_callback(&mut self, id: usize) -> FacilityResult<()>;
-    fn add_event_buffer(&mut self, range: EventSlice) -> FacilityResult<()>;
+    fn subscribe_to_event_buffer(&mut self) -> Receiver<Arc<PooledBuffer<EventCD>>>;
+    fn add_event_buffer(&mut self, range: Arc<PooledBuffer<EventCD>>);
 }
 
 pub trait EventFrameDecoderFacility {
