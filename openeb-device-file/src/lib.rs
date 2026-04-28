@@ -453,11 +453,6 @@ impl BaseDecoderFacility for RREventStreamDecoder {
     fn subscribe_to_protocol_violation(&mut self) -> Receiver<SharedError> {
         self.decoder.subscribe_to_protocol_violation()
     }
-
-    fn unsubscribe_to_protocol_violation(&mut self) -> bool {
-        self.decoder.unsubscribe_to_protocol_violation()
-    }
-
     fn get_raw_event_size_bytes(&self) -> FacilityResult<u8> {
         Ok(2)
     }
@@ -473,11 +468,10 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn test_read_and_decode_raw_evt3() {
+    fn test_read_and_decode_raw_evt3() -> Result<(), Box<dyn std::error::Error>> {
         // Point this to a valid .raw file in your test directory
         let mut file_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         file_path.push("tests");
-        file_path.push("data");
         file_path.push("sample.raw");
 
         // 1. Device Initialization
@@ -518,12 +512,7 @@ mod tests {
                     chunks_processed += 1;
 
                     // Ensure the decoder processes the raw bytes without returning an Err
-                    match decoder.decode(buffer) {
-                        Ok(_) => {}
-                        Err(err) => {
-                            eprintln!("{}", err)
-                        }
-                    }
+                    decoder.decode(buffer)?;
 
                     // Optional: Assert event dispatching
                     // while let Ok(events) = cd_receiver.try_recv() {
@@ -553,5 +542,7 @@ mod tests {
             "Successfully parsed {} bytes across {} chunks.",
             total_bytes_read, chunks_processed
         );
+
+        Ok(())
     }
 }

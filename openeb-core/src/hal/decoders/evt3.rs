@@ -1,13 +1,13 @@
-use crossbeam::channel::{Receiver, Sender, TrySendError, bounded};
-use std::any::TypeId;
-use std::collections::hash_map::HashMap;
-use std::error::Error;
-use std::sync::{Arc, RwLock};
+use crossbeam::channel::{Receiver, Sender, bounded};
+use std::sync::Arc;
 
-use crate::hal::errors::{DecoderError, DecoderProtocolViolation, SharedError};
-use crate::hal::facilities::{BaseDecoderFacility, EventsStreamDecoderFacility};
+use crate::hal::dispatcher::{ErrorDispatcher, EventDispatcher};
+use crate::hal::errors::{DecoderProtocolViolation, SharedError};
+use crate::hal::facilities::{
+    BaseDecoderFacility, EventDecoderFacility, EventsStreamDecoderFacility,
+};
 use crate::hal::types::{EventCD, EventExtTrigger};
-use log::{debug, warn};
+use log::warn;
 use macros::derive_value;
 use macros::new;
 
@@ -138,10 +138,12 @@ impl Default for Evt3Decoder {
 
 impl Evt3Decoder {
     pub fn new(max_x: u16, max_y: u16, do_time_shift: bool) -> Self {
-        let mut decoder = Evt3Decoder::default();
-        decoder.max_x = max_x;
-        decoder.max_y = max_y;
-        decoder.do_time_shift = do_time_shift;
+        let decoder: Evt3Decoder = Evt3Decoder {
+            max_x,
+            max_y,
+            do_time_shift,
+            ..Default::default()
+        };
 
         decoder
     }
@@ -173,165 +175,6 @@ enum EVTWord {
     Others,
     /// 12-bit continued data event.
     Continued12,
-}
-
-pub struct ErrorDispatcher {
-    subscribers: RwLock<HashMap<TypeId, Vec<Sender<SharedError>>>>,
-    channel_capacity: usize,
-}
-
-impl Default for ErrorDispatcher {
-    fn default() -> Self {
-        ErrorDispatcher::new(1024)
-    }
-}
-
-impl ErrorDispatcher {
-    /// Initializes the dispatcher with a set capacity for all subscriber channels.
-    pub fn new(channel_capacity: usize) -> Self {
-        Self {
-            subscribers: RwLock::new(HashMap::new()),
-            channel_capacity,
-        }
-    }
-
-    pub fn subscribe<T: Error + 'static>(&self) -> Receiver<SharedError> {
-        let (tx, rx) = bounded(self.channel_capacity);
-        let type_id = TypeId::of::<T>();
-
-        let mut subs = self.subscribers.write().unwrap();
-        subs.entry(type_id).or_default().push(tx);
-
-        rx
-    }
-
-    pub fn unsubscribe<T: Error + 'static>(&self) -> bool {
-        let type_id = TypeId::of::<T>();
-        let mut subs = self.subscribers.write().unwrap();
-        subs.remove(&type_id).is_some()
-    }
-
-    pub fn dispatch<T: Error + Send + Sync + 'static>(&self, error: T) {
-        let type_id = TypeId::of::<T>();
-        let shared_error: SharedError = Arc::new(error);
-
-        let mut subs = self.subscribers.write().unwrap();
-
-        if let Some(senders) = subs.get_mut(&type_id) {
-            senders.retain(|tx| {
-                match tx.try_send(Arc::clone(&shared_error)) {
-                    Ok(_) => true,
-                    // The receiver is active but the queue is full.
-                    // Keep the channel registered, but drop this specific message for this consumer.
-                    Err(TrySendError::Full(_)) => {
-                        // Optional: Log the dropped message metric here
-                        true
-                    }
-                    // The receiver has been dropped. Remove the sender from the vector.
-                    Err(TrySendError::Disconnected(_)) => false,
-                }
-            });
-        }
-    }
-}
-
-/// A dispatcher that routes events to multiple subscribers.
-/// It supports routing for both CD (Change Detection) events and External Trigger events.
-pub struct EventDispatcher {
-    /// Subscribers for CD (Change Detection) events.
-    cd_subscribers: RwLock<Vec<Sender<Arc<PooledBuffer<EventCD>>>>>,
-    /// Subscribers for external trigger events.
-    ext_subscribers: RwLock<Vec<Sender<Arc<PooledBuffer<EventExtTrigger>>>>>,
-}
-
-impl Default for EventDispatcher {
-    fn default() -> Self {
-        EventDispatcher::new()
-    }
-}
-
-impl EventDispatcher {
-    /// Creates a new `EventDispatcher` with empty subscriber lists.
-    fn new() -> Self {
-        EventDispatcher {
-            cd_subscribers: RwLock::new(Vec::new()),
-            ext_subscribers: RwLock::new(Vec::new()),
-        }
-    }
-
-    /// Subscribes to CD events.
-    ///
-    /// # Arguments
-    /// * `capacity` - The maximum number of unread event batches the channel can hold.
-    ///
-    /// # Returns
-    /// A `Receiver` channel to consume `EventCD` batches.
-    fn subscribe_cd(&self, capacity: usize) -> Receiver<Arc<PooledBuffer<EventCD>>> {
-        let (tx, rx) = bounded(capacity);
-        self.cd_subscribers.write().unwrap().push(tx);
-        rx
-    }
-
-    /// Subscribes to External Trigger events.
-    ///
-    /// # Arguments
-    /// * `capacity` - The maximum number of unread event batches the channel can hold.
-    ///
-    /// # Returns
-    /// A `Receiver` channel to consume `EventExtTrigger` batches.
-    fn subscribe_ext(&self, capacity: usize) -> Receiver<Arc<PooledBuffer<EventExtTrigger>>> {
-        let (tx, rx) = bounded(capacity);
-        self.ext_subscribers.write().unwrap().push(tx);
-        rx
-    }
-
-    /// Broadcasts a batch of CD events to all registered subscribers.
-    ///
-    /// Handles subscriber backpressure by dropping the event batch for any subscriber
-    /// whose queue is full, and automatically cleans up disconnected subscribers.
-    fn send_cd(&self, events: Arc<PooledBuffer<EventCD>>) {
-        let mut subs = self.cd_subscribers.write().unwrap();
-
-        subs.retain(|tx| {
-            match tx.try_send(events.clone()) {
-                Ok(_) => true, // Successfully queued
-                Err(TrySendError::Full(_)) => {
-                    // Backpressure applied: The consumer is too slow.
-                    // We drop the batch for this consumer but keep them subscribed.
-                    warn!(
-                        "CD Event subscriber queue full. Dropping batch of {} events.",
-                        events.len()
-                    );
-                    true
-                }
-                Err(TrySendError::Disconnected(_)) => {
-                    // The consumer has been destroyed. Remove them from the routing table.
-                    debug!("CD Event subscriber disconnected. Removing from dispatcher.");
-                    false
-                }
-            }
-        });
-    }
-
-    /// Broadcasts a batch of External Trigger events to all registered subscribers.
-    ///
-    /// Handles subscriber backpressure by dropping the event batch for any subscriber
-    /// whose queue is full, and automatically cleans up disconnected subscribers.
-    fn send_ext(&self, events: Arc<PooledBuffer<EventExtTrigger>>) {
-        let mut subs = self.ext_subscribers.write().unwrap();
-
-        subs.retain(|tx| match tx.try_send(events.clone()) {
-            Ok(_) => true,
-            Err(TrySendError::Full(_)) => {
-                warn!("ExtTrigger subscriber queue full. Dropping batch.");
-                true
-            }
-            Err(TrySendError::Disconnected(_)) => {
-                debug!("ExtTrigger subscriber disconnected. Removing from dispatcher.");
-                false
-            }
-        });
-    }
 }
 
 /// Implements the `TryFrom` trait to safely parse an `EVTWord` from a 16-bit reference.
@@ -402,8 +245,8 @@ impl Evt3Decoder {
         // Return the continuous 64-bit time
         let abs_ts = self.time_offset + t24;
         if self.do_time_shift {
-            let first = *self.first_ts.get_or_insert_with(|| abs_ts);
-            self.last_t = abs_ts - first;
+            let first = *self.first_ts.get_or_insert(abs_ts);
+            self.last_t = abs_ts.saturating_sub(first);
         } else {
             self.last_t = abs_ts
         }
@@ -414,6 +257,10 @@ impl Evt3Decoder {
     /// Flushes any pending operations by dispatching them immediately.
     pub fn flush(&mut self) {
         self.dispatch();
+    }
+
+    fn reset(&mut self) {
+        self.prev_word = None;
     }
 
     /// Processes a single 16-bit word from the event stream, decoding its type
@@ -431,35 +278,47 @@ impl Evt3Decoder {
         const MASK_4: u16 = 0x000F;
         const MASK_8: u16 = 0x00FF;
 
-        let evt_type = EVTWord::try_from(&word)?;
+        let evt_result = EVTWord::try_from(&word);
+        if let Err(e) = evt_result {
+            self.reset();
+            return Err(e);
+        }
 
+        let evt_type = evt_result.expect("If this happens, there's something strange going on.");
         match evt_type {
             EVTWord::AddrY => {
                 // Decode and validate the Y coordinate
                 let new_y = word & MASK_11;
-                if new_y > self.max_y {
-                    return Err(DecoderProtocolViolation::OutOfBoundsEventCoordinate);
-                }
                 self.y = Some(new_y);
                 self.prev_word = Some(EVTWord::AddrY);
             }
             EVTWord::AddrX => {
                 // Ensure a Y coordinate was previously received
-                let y = self.y.ok_or(DecoderProtocolViolation::MissingYAddr)?;
+                let y_result = self.y.ok_or(DecoderProtocolViolation::MissingYAddr);
+                if let Err(e) = y_result {
+                    self.reset();
+                    return Err(e);
+                }
+                let y = y_result.expect("Somehow y is an error but didn't get consumed in the error condition check. Weird.");
                 // Decode and validate the X coordinate
                 let x = word & MASK_11;
                 if x > self.max_x {
+                    self.reset();
                     return Err(DecoderProtocolViolation::OutOfBoundsEventCoordinate);
                 }
                 // Extract polarity and generate a Contrast Detector (CD) event
-                let p = ((word >> 11) & 0x01) == 1;
-                let t = self.current_timestamp();
-                self.cd_buffer.push(EventCD::new(x.into(), y.into(), p, t));
-                self.prev_word = Some(EVTWord::AddrX);
+                // Only if y is valid
+                if y < self.max_y {
+                    let p = ((word >> 11) & 0x01) == 1;
+                    let t = self.current_timestamp();
+                    self.cd_buffer.push(EventCD::new(x.into(), y.into(), p, t));
+                    self.prev_word = Some(EVTWord::AddrX);
+                }
             }
             EVTWord::VectBaseX => {
                 // Establish the base X coordinate and polarity for subsequent vector events
                 if self.y.is_none() {
+                    self.reset();
                     return Err(DecoderProtocolViolation::MissingYAddr);
                 }
                 self.base_x = word & MASK_11;
@@ -472,6 +331,7 @@ impl Evt3Decoder {
                     self.prev_word,
                     Some(EVTWord::VectBaseX) | Some(EVTWord::Vect12)
                 ) {
+                    self.reset();
                     return Err(DecoderProtocolViolation::InvalidVectBase);
                 }
 
@@ -481,6 +341,7 @@ impl Evt3Decoder {
 
                 // Validate that the vector length won't exceed maximum X coordinate
                 if self.base_x + (bit_count - 1) > self.max_x {
+                    self.reset();
                     return Err(DecoderProtocolViolation::OutOfBoundsEventCoordinate);
                 }
 
@@ -491,10 +352,12 @@ impl Evt3Decoder {
                 let valid = word & mask;
 
                 // Generate CD events for each active bit in the vector payload
-                for i in 0..bit_count {
-                    if (valid >> i) & 0x01 == 1 {
-                        self.cd_buffer
-                            .push(EventCD::new((x + i).into(), y.into(), p, t.into()));
+                if y < self.max_y {
+                    for i in 0..bit_count {
+                        if (valid >> i) & 0x01 == 1 {
+                            self.cd_buffer
+                                .push(EventCD::new((x + i).into(), y.into(), p, t));
+                        }
                     }
                 }
 
@@ -508,7 +371,7 @@ impl Evt3Decoder {
                 let channel = ((word >> 8) & MASK_4) as usize;
                 let val = word & 0x01 == 1;
                 self.ext_trigger_buffer
-                    .push(EventExtTrigger::new(val, t.into(), channel));
+                    .push(EventExtTrigger::new(val, t, channel));
                 self.prev_word = Some(EVTWord::ExtTrigger);
             }
             EVTWord::TimeLow => {
@@ -517,24 +380,29 @@ impl Evt3Decoder {
                 self.prev_word = Some(EVTWord::TimeLow);
             }
             EVTWord::TimeHigh => {
-                // Update the higher bits of the current timestamp and check for valid progression
                 let new_time_high = (word & MASK_12) as usize;
-
-                // Broadened wrap detection logic
                 let wrap = self.time_high > 0xF00 && new_time_high < 0x0FF;
 
-                // Enforce monotonic time progression, allowing for normal wrap-arounds
+                // Track the specific error instead of a boolean
+                let mut violation = None;
+
                 if new_time_high < self.time_high && !wrap && self.first_ts.is_some() {
-                    return Err(DecoderProtocolViolation::NonMonotonicTimeHigh);
-                }
-                // Check for unexpected large jumps in time
-                if new_time_high > self.time_high + 10 && self.first_ts.is_some() {
-                    return Err(DecoderProtocolViolation::NonContinuousTimeHigh);
+                    violation = Some(DecoderProtocolViolation::NonMonotonicTimeHigh);
+                } else if new_time_high > self.time_high + 10 && self.first_ts.is_some() {
+                    violation = Some(DecoderProtocolViolation::NonContinuousTimeHigh);
                 }
 
+                // Always synchronize the clock to the hardware stream.
+                // Do not call reset() here, because this word successfully
+                // establishes a new time baseline for subsequent TimeLow words.
                 self.prev_time_high = self.time_high;
                 self.time_high = new_time_high;
                 self.prev_word = Some(EVTWord::TimeHigh);
+
+                // Return the specific error if one occurred
+                if let Some(err) = violation {
+                    return Err(err);
+                }
             }
             EVTWord::Continued12 | EVTWord::Continued4 => {
                 // Accumulate multi-word payload bits for 'Others' events
@@ -554,7 +422,11 @@ impl Evt3Decoder {
                 };
 
                 if !valid_prev {
-                    return Err(DecoderProtocolViolation::PartialContinued);
+                    // Discard the orphaned payload and clear the state machine to prevent cascading failures
+                    self.payload_accumulator = 0;
+                    self.payload_bit_shift = 0;
+                    self.prev_word = None;
+                    return Ok(());
                 }
 
                 let mask = if is_12 { MASK_12 } else { MASK_4 };
@@ -562,9 +434,17 @@ impl Evt3Decoder {
 
                 // Shift and accumulate the payload
                 let payload = (word & mask) as usize;
-                self.payload_accumulator |= payload << self.payload_bit_shift;
-                self.payload_bit_shift += shift_inc;
-                self.prev_word = Some(evt_type);
+                match payload.checked_shl(self.payload_bit_shift as u32) {
+                    Some(shifted_payload) => {
+                        self.payload_accumulator |= shifted_payload;
+                        self.payload_bit_shift += shift_inc;
+                        self.prev_word = Some(evt_type);
+                    }
+                    None => {
+                        self.reset();
+                        return Err(DecoderProtocolViolation::PartialContinued);
+                    }
+                }
             }
             EVTWord::Others => {
                 // Initiate a new sequence for generic/other multi-word data types
@@ -606,7 +486,7 @@ impl Evt3Decoder {
             };
 
             // Send the pooled buffer to the event dispatcher
-            self.evt_dispatcher.send_cd(Arc::new(pooled));
+            self.add_event_buffer(Arc::new(pooled));
         }
 
         // Process external trigger buffer if it contains any events
@@ -640,14 +520,6 @@ impl BaseDecoderFacility for Evt3Decoder {
         self.err_dispatcher.subscribe::<DecoderProtocolViolation>()
     }
 
-    /// Unsubscribes from decoder protocol violation errors.
-    ///
-    /// Returns `true` if successfully unsubscribed, `false` otherwise.
-    fn unsubscribe_to_protocol_violation(&mut self) -> bool {
-        self.err_dispatcher
-            .unsubscribe::<DecoderProtocolViolation>()
-    }
-
     /// Gets the size of a raw event in bytes.
     ///
     /// Always returns `Ok(2)` for EVT3 since the raw event size is fixed.
@@ -670,7 +542,9 @@ impl EventsStreamDecoderFacility for Evt3Decoder {
             // Otherwise, append the split byte to the first byte in the stream.
             // This is to handle a buffer that isn't aligned with a word boundary
             let word = u16::from_le_bytes([first_byte, data[0]]);
-            self.process_word(word)?;
+            if let Err(e) = self.process_word(word) {
+                self.err_dispatcher.dispatch(e);
+            }
             data = &data[1..] // Move the buffer forward past the consumed byte
         }
 
@@ -681,7 +555,10 @@ impl EventsStreamDecoderFacility for Evt3Decoder {
             let lsw = chunk[0];
             let msw = chunk[1];
             let word = u16::from_le_bytes([lsw, msw]);
-            self.process_word(word)?;
+
+            if let Err(e) = self.process_word(word) {
+                self.err_dispatcher.dispatch(e);
+            }
         }
 
         if !remainder.is_empty() {
@@ -717,5 +594,15 @@ impl EventsStreamDecoderFacility for Evt3Decoder {
         // TODO: Figure out what it means for an event stream to be indexible and handle this
         // accordingly.
         false
+    }
+}
+
+impl EventDecoderFacility for Evt3Decoder {
+    fn subscribe_to_event_buffer(&mut self) -> Receiver<Arc<PooledBuffer<EventCD>>> {
+        self.evt_dispatcher.subscribe_cd(2048)
+    }
+
+    fn add_event_buffer(&mut self, range: Arc<PooledBuffer<EventCD>>) {
+        self.evt_dispatcher.send_cd(range);
     }
 }
