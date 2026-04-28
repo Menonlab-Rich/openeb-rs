@@ -150,6 +150,7 @@ pub enum FacilityType {
     EventTrailFilterModuleFacility,
     EventsStreamFacility,
     EventsStreamDecoderFacility,
+    EventDecoderFacility,
     GeometryFacility,
     HALSoftwareInfoFacility,
     HWIdentificationFacility,
