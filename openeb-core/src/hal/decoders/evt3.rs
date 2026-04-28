@@ -1,6 +1,7 @@
 use crossbeam::channel::{Receiver, Sender, bounded};
 use std::sync::Arc;
 
+use crate::hal::decoders::buffer::PooledBuffer;
 use crate::hal::dispatcher::{ErrorDispatcher, EventDispatcher};
 use crate::hal::errors::{DecoderProtocolViolation, SharedError};
 use crate::hal::facilities::{
@@ -12,37 +13,6 @@ use macros::derive_value;
 use macros::new;
 
 use std::ops::Deref;
-
-/// A wrapper that returns its inner vector to a recycling channel when dropped.
-pub struct PooledBuffer<T> {
-    /// The underlying vector. Wrapped in an Option so it can be taken out during Drop.
-    buffer: Option<Vec<T>>,
-    /// The channel used to return the vector to the pool for reuse.
-    return_channel: Sender<Vec<T>>,
-}
-
-/// Implements `Deref` to allow `PooledBuffer` to be treated transparently as a `&Vec<T>`.
-impl<T> Deref for PooledBuffer<T> {
-    type Target = Vec<T>;
-
-    fn deref(&self) -> &Self::Target {
-        self.buffer
-            .as_ref()
-            .expect("Buffer is always Some until Drop")
-    }
-}
-
-/// Automatically returns the cleared vector to the recycling channel when dropped.
-impl<T> Drop for PooledBuffer<T> {
-    fn drop(&mut self) {
-        // Take ownership of the buffer out of the Option
-        if let Some(mut buf) = self.buffer.take() {
-            buf.clear(); // Reset length to 0, but retain capacity
-            // Try to return to the pool. If the pool is full or dropped, let it deallocate.
-            let _ = self.return_channel.try_send(buf);
-        }
-    }
-}
 
 /// Decoder for the EVT3 event data format.
 /// EVT3 is commonly used by event-based vision sensors to encode timestamps and pixel coordinates efficiently.

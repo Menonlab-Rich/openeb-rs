@@ -1,199 +1,24 @@
+pub mod header;
+pub mod types;
+
+use crate::header::{Header, sensor_info_from_header};
+use crate::types::{DeviceFileError, FileFormat, FormatDecoder};
 use crossbeam::channel::Receiver;
-use macros::{derive_value, pack_facility};
-use openeb_core::hal::decoders::evt3::Evt3Decoder;
+use macros::pack_facility;
+use openeb_core::hal::decoders::evt3::{Evt3Decoder, PooledBuffer};
+use openeb_core::hal::decoders::raw_fmt_decoder::RawFormatDecoder;
 use openeb_core::hal::device::device::Device;
 use openeb_core::hal::errors::{SharedError, StreamError};
 use openeb_core::hal::facilities::{
-    BaseDecoderFacility, ConnectionType, EventsStreamDecoderFacility, EventsStreamFacility,
-    FacilityError, FacilityHandle, FacilityResult, FacilityType, GeometryFacility,
-    HWIdentificationFacility, SensorInfo, SystemInfo,
+    BaseDecoderFacility, ConnectionType, EventDecoderFacility, EventsStreamDecoderFacility,
+    EventsStreamFacility, FacilityError, FacilityHandle, FacilityResult, FacilityType,
+    GeometryFacility, HWIdentificationFacility, SensorInfo, SystemInfo,
 };
+use openeb_core::hal::types::EventCD;
 use std::collections::HashMap;
-use std::fmt::{Display, format};
 use std::fs::File;
-use std::io::{BufRead, Read};
-use std::sync::Arc;
-use thiserror::Error;
-
-// --- Supporting Types ---
-
-#[derive(Error, Debug)]
-pub enum DeviceFileError {
-    #[error("IO Error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("Unsupported format: {0}")]
-    Format(String),
-    #[error("Could not find geometry in header")]
-    UnknownGeometry(),
-    #[error("Could not parse geometry as an integer: {0}")]
-    GeometryParsing(#[from] std::num::ParseIntError),
-    #[error("End of file reached")]
-    EOF(),
-}
-
-#[derive_value]
-pub enum FileFormat {
-    EVT2,
-    EVT3,
-    DAT,
-    HDF5,
-    UNKNOWN,
-}
-
-impl Display for FileFormat {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FileFormat::EVT2 => write!(f, "evt 2.0"),
-            FileFormat::EVT3 => write!(f, "evt 3.0"),
-            FileFormat::DAT => write!(f, "dat"),
-            FileFormat::HDF5 => write!(f, "hdf5"),
-            _ => write!(f, "UNKNOWN"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Header {
-    pub format: FileFormat,
-    pub width: u32,
-    pub height: u32,
-    pub metadata: HashMap<String, String>,
-}
-
-impl Header {
-    pub fn parse<R: BufRead>(reader: &mut R) -> Result<Header, DeviceFileError> {
-        let mut metadata = HashMap::new();
-
-        loop {
-            let buf = reader.fill_buf()?;
-            if buf.is_empty() || buf[0] != b'%' {
-                break;
-            }
-
-            let mut line = String::new();
-            reader.read_line(&mut line)?;
-
-            let line = line.trim();
-            if let Some(rest) = line.strip_prefix('%') {
-                let parts: Vec<&str> = rest.splitn(2, ':').collect();
-                if parts.len() == 2 {
-                    metadata.insert(parts[0].trim().to_string(), parts[1].trim().to_string());
-                } else {
-                    let parts: Vec<&str> = rest.split_whitespace().collect();
-                    if parts.len() >= 2 {
-                        metadata.insert(parts[0].to_string(), parts[1..].join(" "));
-                    }
-                }
-            }
-        }
-
-        let raw_format_str = metadata
-            .get("Data format")
-            .or_else(|| metadata.get("format"))
-            .map(|s| s.as_str())
-            .unwrap_or("UNKNOWN");
-
-        let parts = raw_format_str.splitn(3, ';');
-        let mut format_str: Option<String> = None;
-        let mut width: Option<String> = None;
-        let mut height: Option<String> = None;
-        for (i, p) in parts.enumerate() {
-            match i {
-                0 => format_str = Some(p.to_string()),
-                1 => width = Some(p.to_string()),
-                2 => height = Some(p.to_string()),
-                _ => panic!("This should never happen"),
-            }
-        }
-
-        let fmt_str = format_str.unwrap_or_else(|| raw_format_str.to_string());
-
-        let format = match fmt_str.as_str() {
-            "EVT2" => FileFormat::EVT2,
-            "EVT3" => FileFormat::EVT3,
-            "DAT" => FileFormat::DAT,
-            "HDF5" => FileFormat::HDF5,
-            _ => FileFormat::UNKNOWN,
-        };
-
-        if let Some(w) = width {
-            metadata.insert("Geometry".to_string(), format!("{},{}", w, height.unwrap()));
-        }
-
-        let geometry_str = metadata
-            .get("Geometry")
-            .ok_or_else(|| metadata.get("geometry"))
-            .or(Err(DeviceFileError::UnknownGeometry()))?;
-
-        let coords = {
-            if geometry_str.contains("=") {
-                geometry_str
-                    .split(',')
-                    .try_fold(HashMap::<&str, &str>::new(), |mut acc, s| {
-                        let parts: Vec<&str> = s.split("=").collect();
-                        if parts.len() != 2 {
-                            return Err(DeviceFileError::UnknownGeometry());
-                        }
-                        acc.insert(parts[0], parts[1]);
-                        Ok(acc)
-                    })
-            } else {
-                let mut coord_map = HashMap::<&str, &str>::new();
-                let coord_values: Vec<&str> = geometry_str.split(',').collect();
-                if coord_values.len() != 2 {
-                    return Err(DeviceFileError::UnknownGeometry());
-                }
-                coord_map.insert("width", coord_values[0]);
-                coord_map.insert("height", coord_values[1]);
-
-                Ok(coord_map)
-            }
-        }?;
-        if coords.len() != 2 {
-            return Err(DeviceFileError::UnknownGeometry());
-        }
-
-        let width = coords
-            .get("width")
-            .ok_or(DeviceFileError::UnknownGeometry())?
-            .parse::<u32>()?;
-        let height = coords
-            .get("height")
-            .ok_or(DeviceFileError::UnknownGeometry())?
-            .parse::<u32>()?;
-
-        Ok(Header {
-            format,
-            width,
-            height,
-            metadata,
-        })
-    }
-}
-
-fn sensor_info_from_header(header: &Header) -> SensorInfo {
-    let name = header
-        .metadata
-        .get("sensor_name")
-        .map_or("UNKNOWN".to_string(), |v| v.to_string());
-    let integrator = header
-        .metadata
-        .get("integrator_name")
-        .map_or("UNKNOWN".to_string(), |v| v.to_string());
-    let version = header
-        .metadata
-        .get("sensor_generation")
-        .or_else(|| header.metadata.get("generation"))
-        .map_or("x.x".to_string(), |v| v.to_string());
-
-    SensorInfo {
-        name,
-        integrator,
-        version,
-    }
-}
-
-// --- Main Device ---
+use std::io::{Read, Seek, SeekFrom};
+use std::sync::{Arc, RwLock};
 
 pub struct RawFileReader {
     header: Arc<Header>,
@@ -202,9 +27,21 @@ pub struct RawFileReader {
 
 impl RawFileReader {
     fn new_from_path(path: &str) -> Result<Self, DeviceFileError> {
-        let file = std::fs::File::open(path)?;
-        let mut reader = std::io::BufReader::new(&file);
+        let mut file = std::fs::File::open(path)?;
+
+        // 1. Create the reader and parse the header
+        let mut reader = std::io::BufReader::new(&mut file);
         let header = Header::parse(&mut reader)?;
+
+        // 2. Capture the exact logical byte offset where the header ends
+        let header_end_pos = reader.stream_position()?;
+
+        // 3. Drop the BufReader to release the mutable borrow on `file`
+        drop(reader);
+
+        // 4. Force the OS file descriptor back to the start of the binary payload
+        file.seek(SeekFrom::Start(header_end_pos))?;
+
         let header_arc = Arc::new(header);
         let mut device = RawFileReader {
             header: header_arc.clone(),
@@ -228,6 +65,7 @@ impl RawFileReader {
             pack_facility!(ro HWIdentificationFacility, hw_ident),
         );
 
+        // The file is now perfectly aligned for the stream facility
         let stream = RREventStream::new(file);
         device.register_facility(
             FacilityType::EventsStreamFacility,
@@ -237,7 +75,11 @@ impl RawFileReader {
         let decoder = RREventStreamDecoder::new(&header_arc.clone(), true); // Assuming do_time_shift = true
         device.register_facility(
             FacilityType::EventsStreamDecoderFacility,
-            pack_facility!(mut EventsStreamDecoderFacility, decoder),
+            pack_facility!(mut EventsStreamDecoderFacility, decoder.clone()),
+        );
+        device.register_facility(
+            FacilityType::EventDecoderFacility,
+            pack_facility!(mut EventDecoderFacility, decoder),
         );
 
         Ok(device)
@@ -392,69 +234,87 @@ impl EventsStreamFacility for RREventStream {
     }
 }
 
+#[derive(Clone)]
 pub struct RREventStreamDecoder {
-    decoder: Box<dyn EventsStreamDecoderFacility + Send + Sync>, // Added Send + Sync if multi-threading is required
+    // Requires Send + Sync if the device will be shared across thread boundaries
+    inner: Arc<RwLock<Box<dyn RawFormatDecoder + Send + Sync>>>,
     pub event_format: FileFormat,
 }
 
 impl RREventStreamDecoder {
     pub fn new(header: &Header, do_time_shift: bool) -> Self {
-        // Box the specific decoder implementations to unify their type
-        let decoder: Box<dyn EventsStreamDecoderFacility + Send + Sync> = match header.format {
-            FileFormat::EVT2 => todo!(),
+        let decoder: Box<dyn RawFormatDecoder + Send + Sync> = match header.format {
             FileFormat::EVT3 => Box::new(Evt3Decoder::new(
                 header.width as u16,
                 header.height as u16,
                 do_time_shift,
             )),
-            FileFormat::DAT => todo!(),
-            FileFormat::HDF5 => todo!(),
-            FileFormat::UNKNOWN => todo!(),
+            FileFormat::EVT2 => todo!("Implement EVT2 Decoder"),
+            FileFormat::DAT => todo!("Implement DAT Decoder"),
+            FileFormat::HDF5 => todo!("Implement HDF5 Decoder"),
+            FileFormat::UNKNOWN => unimplemented!("Cannot construct decoder for UNKNOWN format"),
         };
 
         Self {
             event_format: header.format.clone(),
-            decoder,
+            inner: Arc::new(RwLock::new(decoder)),
         }
+    }
+}
+
+impl EventDecoderFacility for RREventStreamDecoder {
+    fn subscribe_to_event_buffer(&mut self) -> Receiver<Arc<PooledBuffer<EventCD>>> {
+        self.inner.write().unwrap().subscribe_to_event_buffer()
+    }
+
+    fn add_event_buffer(&mut self, range: Arc<PooledBuffer<EventCD>>) {
+        self.inner.write().unwrap().add_event_buffer(range)
     }
 }
 
 impl EventsStreamDecoderFacility for RREventStreamDecoder {
     fn decode(&mut self, raw_data: &[u8]) -> FacilityResult<()> {
-        self.decoder.decode(raw_data)
+        self.inner.write().unwrap().decode(raw_data)
     }
 
     fn get_last_timestamp(&self) -> usize {
-        self.decoder.get_last_timestamp()
+        self.inner.read().unwrap().get_last_timestamp()
     }
 
     fn get_timestamp_shift(&self) -> Option<usize> {
-        self.decoder.get_timestamp_shift()
+        self.inner.read().unwrap().get_timestamp_shift()
     }
 
     fn is_time_shifting_enabled(&self) -> bool {
-        self.decoder.is_time_shifting_enabled()
+        self.inner.read().unwrap().is_time_shifting_enabled()
     }
 
     fn reset_last_timestamp(&mut self, timestamp: usize) {
-        self.decoder.reset_last_timestamp(timestamp)
+        self.inner.write().unwrap().reset_last_timestamp(timestamp)
     }
 
     fn reset_timestamp_shift(&mut self, shift: usize) {
-        self.decoder.reset_timestamp_shift(shift)
+        self.inner.write().unwrap().reset_timestamp_shift(shift)
     }
 
     fn is_decoded_event_stream_indexable(&self) -> bool {
-        self.decoder.is_decoded_event_stream_indexable()
+        self.inner
+            .read()
+            .unwrap()
+            .is_decoded_event_stream_indexable()
     }
 }
 
 impl BaseDecoderFacility for RREventStreamDecoder {
     fn subscribe_to_protocol_violation(&mut self) -> Receiver<SharedError> {
-        self.decoder.subscribe_to_protocol_violation()
+        self.inner
+            .write()
+            .unwrap()
+            .subscribe_to_protocol_violation()
     }
+
     fn get_raw_event_size_bytes(&self) -> FacilityResult<u8> {
-        Ok(2)
+        self.inner.read().unwrap().get_raw_event_size_bytes()
     }
 }
 
@@ -463,7 +323,8 @@ mod tests {
     use super::*; // Adjust imports based on your file structure
     use openeb_core::hal::errors::StreamError;
     use openeb_core::hal::facilities::{
-        EventsStreamDecoderFacilityHandle, EventsStreamFacilityHandle, FacilityError, FacilityType,
+        EventDecoderFacilityHandle, EventsStreamDecoderFacilityHandle, EventsStreamFacilityHandle,
+        FacilityError, FacilityType,
     };
     use std::path::PathBuf;
 
@@ -493,10 +354,17 @@ mod tests {
             .try_into()
             .unwrap();
 
+        let event_decoder_handle: EventDecoderFacilityHandle = device
+            .get_facility(FacilityType::EventDecoderFacility)
+            .expect("EventDecoderFacility was not registered")
+            .try_into()
+            .unwrap();
+
         let mut decoder = decoder_handle.write().unwrap();
+        let mut event_decoder = event_decoder_handle.write().unwrap();
 
         // Optional: If you implement a way to retrieve the dispatcher from the trait object
-        // let cd_receiver = decoder.subscribe_cd(100);
+        let cd_receiver = event_decoder.subscribe_to_event_buffer();
 
         // 3. Start Stream
         stream.start().expect("Failed to start stream");
@@ -508,19 +376,29 @@ mod tests {
         loop {
             match stream.wait_next_buffer() {
                 Ok((buffer, size)) => {
-                    total_bytes_read += size;
+                    // Decode the raw bytes
                     chunks_processed += 1;
-
-                    // Ensure the decoder processes the raw bytes without returning an Err
+                    total_bytes_read += size;
                     decoder.decode(buffer)?;
 
-                    // Optional: Assert event dispatching
-                    // while let Ok(events) = cd_receiver.try_recv() {
-                    //     assert!(!events.is_empty());
-                    // }
+                    // Drain the receiver channel without blocking
+                    while let Ok(event_batch) = cd_receiver.try_recv() {
+                        // event_batch is of type Arc<PooledBuffer<EventCD>>
+                        // Rust's auto-deref allows direct iteration over the underlying Vec
+                        for event in event_batch.iter() {
+                            // Execute operations on the EventCD struct
+                            // e.g., accessing event.x, event.y, event.p, event.t
+                            dbg!("Event: {}", event);
+                        }
+
+                        // Memory Recycling:
+                        // When event_batch goes out of scope here, the Arc reference count decrements.
+                        // If it reaches 0, the PooledBuffer's Drop implementation executes,
+                        // clearing the vector and returning the capacity to the object pool.
+                    }
                 }
                 Err(FacilityError::Stream(StreamError::EndOfFile)) => {
-                    break; // Successfully reached the end of the file
+                    break;
                 }
                 Err(e) => {
                     panic!("Unexpected stream error: {:?}", e);
