@@ -2,7 +2,7 @@ pub mod header;
 pub mod types;
 
 use crate::header::{Header, sensor_info_from_header};
-use crate::types::{DeviceFileError, FileFormat, FormatDecoder};
+use crate::types::{DeviceFileError, FileFormat};
 use crossbeam::channel::Receiver;
 use macros::pack_facility;
 use openeb_core::hal::decoders::evt3::Evt3Decoder;
@@ -257,7 +257,7 @@ impl RREventStreamDecoder {
         };
 
         Self {
-            event_format: header.format.clone(),
+            event_format: header.format,
             inner: Arc::new(RwLock::new(decoder)),
         }
     }
