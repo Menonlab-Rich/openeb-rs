@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 regex = "1.12.3"
 thiserror = "2.0.18"
-core = { path = "../core/" }
+openeb-core = { path = "../core/" }
 macros = { path = "../macros/" }
+utilities = { path = "../utilities/" }
 crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
