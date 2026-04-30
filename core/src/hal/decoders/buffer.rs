@@ -1,3 +1,6 @@
+use crossbeam::channel::Sender;
+use std::ops::Deref;
+
 /// A wrapper that returns its inner vector to a recycling channel when dropped.
 pub struct PooledBuffer<T> {
     /// The underlying vector. Wrapped in an Option so it can be taken out during Drop.
