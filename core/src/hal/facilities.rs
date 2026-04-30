@@ -1,17 +1,16 @@
-use crate::hal::decoders::evt3::PooledBuffer;
-use crate::hal::types::{EventCD, EventExtTrigger};
-
 use crate::hal::errors::{
     DecoderError, DecoderProtocolViolation, HardwareError, ProcessingError, SharedError,
     StreamError,
 };
 use crate::hal::types::{Cb, CbRo, EventSlice, PixelMask, Region};
+use crate::hal::types::{EventCD, EventExtTrigger};
 use crossbeam::channel::Receiver;
 pub use macros::pack_facility;
 use macros::property;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use thiserror::Error;
+use utilities::buffer::PooledBuffer;
 
 pub type GeometryFacilityHandle = Arc<dyn GeometryFacility + Send + Sync>;
 pub type HALSoftwareInfoFacilityHandle = Arc<dyn HALSoftwareInfoFacility + Send + Sync>;

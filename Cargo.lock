@@ -18,18 +18,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
-name = "core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "crossbeam",
- "log",
- "macros",
- "paste",
- "thiserror",
-]
-
-[[package]]
 name = "crossbeam"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -100,11 +88,12 @@ dependencies = [
 name = "devices"
 version = "0.1.0"
 dependencies = [
- "core",
  "crossbeam",
  "macros",
+ "openeb-core",
  "regex",
  "thiserror",
+ "utilities",
 ]
 
 [[package]]
@@ -136,6 +125,19 @@ name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
+
+[[package]]
+name = "openeb-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "crossbeam",
+ "log",
+ "macros",
+ "paste",
+ "thiserror",
+ "utilities",
+]
 
 [[package]]
 name = "paste"
@@ -226,3 +228,10 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "utilities"
+version = "0.1.0"
+dependencies = [
+ "crossbeam",
+]

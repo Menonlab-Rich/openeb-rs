@@ -1,7 +1,7 @@
 use crossbeam::channel::{Receiver, Sender, bounded};
 use std::sync::Arc;
+use utilities::buffer::PooledBuffer;
 
-use crate::hal::decoders::buffer::PooledBuffer;
 use crate::hal::dispatcher::{ErrorDispatcher, EventDispatcher};
 use crate::hal::errors::{DecoderProtocolViolation, SharedError};
 use crate::hal::facilities::{
@@ -11,8 +11,6 @@ use crate::hal::types::{EventCD, EventExtTrigger};
 use log::warn;
 use macros::derive_value;
 use macros::new;
-
-use std::ops::Deref;
 
 /// Decoder for the EVT3 event data format.
 /// EVT3 is commonly used by event-based vision sensors to encode timestamps and pixel coordinates efficiently.

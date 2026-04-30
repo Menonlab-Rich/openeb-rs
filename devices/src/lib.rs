@@ -5,7 +5,7 @@ use crate::header::{Header, sensor_info_from_header};
 use crate::types::{DeviceFileError, FileFormat, FormatDecoder};
 use crossbeam::channel::Receiver;
 use macros::pack_facility;
-use openeb_core::hal::decoders::evt3::{Evt3Decoder, PooledBuffer};
+use openeb_core::hal::decoders::evt3::Evt3Decoder;
 use openeb_core::hal::decoders::raw_fmt_decoder::RawFormatDecoder;
 use openeb_core::hal::device::device::Device;
 use openeb_core::hal::errors::{SharedError, StreamError};
@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::{Arc, RwLock};
+use utilities::buffer::PooledBuffer;
 
 pub struct RawFileReader {
     header: Arc<Header>,

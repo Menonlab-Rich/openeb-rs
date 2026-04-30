@@ -5,14 +5,13 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use crossbeam::channel::{Receiver, Sender, TrySendError, bounded};
-use log::{debug, warn};
-
 use crate::hal::{
-    decoders::evt3::PooledBuffer,
     errors::SharedError,
     types::{EventCD, EventExtTrigger},
 };
+use crossbeam::channel::{Receiver, Sender, TrySendError, bounded};
+use log::{debug, warn};
+use utilities::buffer::PooledBuffer;
 
 pub struct ErrorDispatcher {
     subscribers: RwLock<HashMap<TypeId, Vec<Sender<SharedError>>>>,

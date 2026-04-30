@@ -1,7 +1,7 @@
 use crossbeam::channel::{Receiver, Sender, bounded};
 use std::sync::Arc;
+use utilities::buffer::PooledBuffer;
 
-use crate::hal::decoders::buffer::PooledBuffer;
 use crate::hal::dispatcher::{ErrorDispatcher, EventDispatcher};
 use crate::hal::errors::SharedError;
 use crate::hal::facilities::{
