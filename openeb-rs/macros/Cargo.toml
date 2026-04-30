@@ -1,0 +1,10 @@
+[package]
+name = "macros"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+derive-new = "0.7.0"
+local-proc-macros = { path="../local-proc-macros/" }
+paste = "1.0.15"
+
