@@ -2,7 +2,7 @@ use crate::hal::errors::{
     DecoderError, DecoderProtocolViolation, HardwareError, ProcessingError, SharedError,
     StreamError,
 };
-use crate::hal::types::{Cb, CbRo, EventSlice, PixelMask, Region};
+use crate::hal::types::{Cb, CbRo, PixelMask, Region};
 use crate::hal::types::{EventCD, EventExtTrigger};
 use crossbeam::channel::Receiver;
 pub use macros::pack_facility;
@@ -48,6 +48,7 @@ pub type CDDecoderFacilityHandle = Arc<RwLock<dyn DecoderFacility<EventCD> + Sen
 pub type EXTDecoderFacilityHandle = Arc<RwLock<dyn DecoderFacility<EventExtTrigger> + Send>>;
 pub type ERCDecoderFacilityHandle = Arc<RwLock<dyn DecoderFacility<EventERCCounter> + Send>>;
 
+use std::any::Any;
 use std::convert::TryFrom;
 
 #[derive(Error, Debug)]
@@ -242,8 +243,24 @@ pub struct SystemInfo {
     pub firmware_version: String,
 }
 
+/// Shared methods all facilities must implement
+pub trait BaseFacility: Any {
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+}
+
+impl<T: Any + Sized> BaseFacility for T {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
 // --- Facilities ---
-pub trait AntiFlickerFacility {
+pub trait AntiFlickerFacility: BaseFacility {
     property! {
         frequency: u32;
         frequency_band: (u32, u32);
@@ -273,7 +290,7 @@ pub trait BaseDecoderFacility {
     }
 }
 
-pub trait DecoderFacility<T>: BaseDecoderFacility {
+pub trait DecoderFacility<T>: BaseDecoderFacility + BaseFacility {
     fn decode(&mut self, raw_data: &[u8]) -> FacilityResult<()>;
     fn add_decode_callback(&mut self, cb: Cb<&[T]>) -> FacilityResult<usize>;
 
@@ -285,26 +302,26 @@ pub trait BufferDecoderFacility<T>: BaseDecoderFacility {
     fn decode_to_buffer(&mut self, raw_data: &[u8], output: &mut Vec<T>) -> FacilityResult<()>;
 }
 
-pub trait CameraSyncFacility {
+pub trait CameraSyncFacility: BaseFacility {
     property! {
         mode: CameraSyncMode;
     }
 }
 
-pub trait DigitalCropFacility {
+pub trait DigitalCropFacility: BaseFacility {
     property! {
         enabled: bool;
         window_region: Region;
     }
 }
 
-pub trait DigitalEventMaskFacility {
+pub trait DigitalEventMaskFacility: BaseFacility {
     property! {
         masks: Vec<PixelMask>;
     }
 }
 
-pub trait ERCModuleFacility {
+pub trait ERCModuleFacility: BaseFacility {
     property! {
         enabled: bool;
         cd_event_rate: u32;
@@ -319,12 +336,12 @@ pub trait ERCModuleFacility {
     fn erc_from_file(&mut self, path: &str) -> FacilityResult<()>;
 }
 
-pub trait EventDecoderFacility {
+pub trait EventDecoderFacility: BaseFacility {
     fn subscribe_to_event_buffer(&mut self) -> Receiver<Arc<PooledBuffer<EventCD>>>;
     fn add_event_buffer(&mut self, range: Arc<PooledBuffer<EventCD>>);
 }
 
-pub trait EventFrameDecoderFacility {
+pub trait EventFrameDecoderFacility: BaseFacility {
     type FrameType;
     property! {
         width: u32;
@@ -334,7 +351,7 @@ pub trait EventFrameDecoderFacility {
     fn add_event_frame_cb(&mut self, callback: CbRo<&Self::FrameType>) -> FacilityResult<usize>;
 }
 
-pub trait EventTrailFilterModuleFacility {
+pub trait EventTrailFilterModuleFacility: BaseFacility {
     property! {
         enabled: bool;
         filter_type: TrailFilterTypes;
@@ -345,21 +362,21 @@ pub trait EventTrailFilterModuleFacility {
     fn get_min_supported_threshold(&self) -> u32;
 }
 
-pub trait EventRateActivityFilterModuleFacility {
+pub trait EventRateActivityFilterModuleFacility: BaseFacility {
     property! {
         enabled: bool;
         thresholds: (u32, u32);
     }
 }
 
-pub trait EventsStreamFacility {
+pub trait EventsStreamFacility: BaseFacility {
     fn start(&mut self) -> FacilityResult<()>;
     fn stop(&mut self) -> FacilityResult<()>;
     fn poll_buffer(&mut self) -> FacilityResult<(&[u8], usize)>;
     fn wait_next_buffer(&mut self) -> FacilityResult<(&[u8], usize)>;
 }
 
-pub trait EventsStreamDecoderFacility: BaseDecoderFacility {
+pub trait EventsStreamDecoderFacility: BaseDecoderFacility + BaseFacility {
     /// Decodes raw data. Identifies the events in the buffer and dispatches them
     /// to the corresponding event decoders.
     ///
@@ -390,16 +407,16 @@ pub trait EventsStreamDecoderFacility: BaseDecoderFacility {
     fn is_decoded_event_stream_indexable(&self) -> bool;
 }
 
-pub trait GeometryFacility {
+pub trait GeometryFacility: BaseFacility {
     fn get_width(&self) -> i32;
     fn get_height(&self) -> i32;
 }
 
-pub trait HALSoftwareInfoFacility {
+pub trait HALSoftwareInfoFacility: BaseFacility {
     fn get_version(&self) -> String;
 }
 
-pub trait HWIdentificationFacility {
+pub trait HWIdentificationFacility: BaseFacility {
     fn get_serial(&self) -> FacilityResult<String>;
     fn get_system_id(&self) -> FacilityResult<i64>;
     fn get_sensor_info(&self) -> FacilityResult<SensorInfo>;
@@ -409,28 +426,28 @@ pub trait HWIdentificationFacility {
     fn get_current_data_encoding_format(&self) -> FacilityResult<String>;
 }
 
-pub trait HWRegisterFacility {
+pub trait HWRegisterFacility: BaseFacility {
     fn read_register(&self, address: u32) -> FacilityResult<u32>;
     fn write_register(&mut self, address: u32, value: u32) -> FacilityResult<()>;
 }
 
-pub trait LLBiasesFacility {
+pub trait LLBiasesFacility: BaseFacility {
     fn set(&mut self, bias_name: &str, bias_value: i32) -> FacilityResult<()>;
     fn get(&self, bias_name: &str) -> FacilityResult<i32>;
     fn get_all_biases(&self) -> FacilityResult<HashMap<String, i32>>;
 }
 
-pub trait MonitoringFacility {
+pub trait MonitoringFacility: BaseFacility {
     fn get_temperature(&self) -> FacilityResult<i32>;
     fn get_illumination(&self) -> FacilityResult<i32>;
 }
 
-pub trait PluginSoftwareInfoFacility {
+pub trait PluginSoftwareInfoFacility: BaseFacility {
     fn get_plugin_name(&self) -> String;
     fn get_version(&self) -> String;
 }
 
-pub trait ROIFacility {
+pub trait ROIFacility: BaseFacility {
     property! {
         enabled: bool;
     }
@@ -439,18 +456,18 @@ pub trait ROIFacility {
     fn set_rois(&mut self, regions: &[Region]) -> FacilityResult<()>;
 }
 
-pub trait ROIPixelMaskFacility {
+pub trait ROIPixelMaskFacility: BaseFacility {
     property! {
         pixel_masks: Vec<PixelMask>;
     }
 }
 
-pub trait TriggerInFacility {
+pub trait TriggerInFacility: BaseFacility {
     fn enable(&mut self, channel: u32) -> FacilityResult<()>;
     fn disable(&mut self, channel: u32) -> FacilityResult<()>;
 }
 
-pub trait TriggerOutFacility {
+pub trait TriggerOutFacility: BaseFacility {
     fn enable(&mut self) -> FacilityResult<()>;
     fn disable(&mut self) -> FacilityResult<()>;
     fn set_period(&mut self, period_us: u32) -> FacilityResult<()>;

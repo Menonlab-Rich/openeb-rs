@@ -193,7 +193,7 @@ impl Evt3Decoder {
     /// # Returns
     /// * `usize` - The calculated continuous timestamp.
     #[inline(always)]
-    fn current_timestamp(&mut self) -> usize {
+    pub fn current_timestamp(&mut self) -> usize {
         let t24 = (self.time_high << 12) | self.time_low;
 
         if t24 < self.last_t24 {
@@ -220,6 +220,22 @@ impl Evt3Decoder {
         }
 
         self.last_t
+    }
+
+    pub fn _get_time_low(&self) -> usize {
+        self.time_low
+    }
+
+    pub fn _get_time_high(&self) -> usize {
+        self.time_high
+    }
+
+    pub fn _set_time_low(&mut self, value: usize) {
+        self.time_low = value
+    }
+
+    pub fn _set_time_high(&mut self, value: usize) {
+        self.time_high = value
     }
 
     /// Flushes any pending operations by dispatching them immediately.
@@ -559,9 +575,7 @@ impl EventsStreamDecoderFacility for Evt3Decoder {
     }
 
     fn is_decoded_event_stream_indexable(&self) -> bool {
-        // TODO: Figure out what it means for an event stream to be indexible and handle this
-        // accordingly.
-        false
+        true
     }
 }
 
@@ -572,5 +586,45 @@ impl EventDecoderFacility for Evt3Decoder {
 
     fn add_event_buffer(&mut self, range: Arc<PooledBuffer<EventCD>>) {
         self.evt_dispatcher.send_cd(range);
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DecoderTimingState {
+    pub time_high: usize,
+    pub time_low: usize,
+    pub time_offset: usize,
+    pub last_t24: usize,
+    pub last_t: usize,
+}
+
+impl Evt3Decoder {
+    /// Captures the current absolute clock state without any spatial properties.
+    pub fn get_timing_state(&self) -> DecoderTimingState {
+        DecoderTimingState {
+            time_high: self.time_high,
+            time_low: self.time_low,
+            time_offset: self.time_offset,
+            last_t24: self.last_t24,
+            last_t: self.last_t,
+        }
+    }
+
+    /// Restores a previously saved timing context and resets spatial tracking states
+    /// to avoid coordinate corruption across chunk boundaries.
+    pub fn set_timing_state(&mut self, state: DecoderTimingState) {
+        self.time_high = state.time_high;
+        self.time_low = state.time_low;
+        self.time_offset = state.time_offset;
+        self.last_t24 = state.last_t24;
+        self.last_t = state.last_t;
+
+        // Reset coordinate state machine
+        self.y = None;
+        self.base_x = 0;
+        self.prev_word = None;
+        self.payload_accumulator = 0;
+        self.payload_bit_shift = 0;
+        self.split_byte = None;
     }
 }

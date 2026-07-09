@@ -10,3 +10,4 @@ openeb-core = { path = "../core/" }
 macros = { path = "../macros/" }
 utilities = { path = "../utilities/" }
 crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
+num-traits = "0.2.19"
