@@ -1,9 +1,9 @@
 use macros::derive_value;
 use openeb_core::hal::{
     decoders::evt3::{DecoderTimingState, Evt3Decoder},
-    facilities::{self, BaseFacility, EventsStreamFacility, FacilityError},
+    facilities::{self, FacilityError},
 };
-use std::{any::Any, fmt::Display, sync::PoisonError};
+use std::fmt::Display;
 use thiserror::Error;
 
 // --- Supporting Types ---

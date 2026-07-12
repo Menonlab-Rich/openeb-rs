@@ -1,7 +1,9 @@
 [workspace]
-members = ["macros",
-"core",
-"devices", 
-"local-proc-macros",
+members = [
+    "macros",
+    "core",
+    "devices",
+    "local-proc-macros",
+    "utilities",
 ]
 resolver = "3"
