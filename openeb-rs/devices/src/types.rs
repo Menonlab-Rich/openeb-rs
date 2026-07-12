@@ -1,7 +1,7 @@
 use macros::derive_value;
 use openeb_core::hal::{
     decoders::evt3::{DecoderTimingState, Evt3Decoder},
-    facilities::{self, BaseFacility, EventsStreamFacility},
+    facilities::{self, BaseFacility, EventsStreamFacility, FacilityError},
 };
 use std::{any::Any, fmt::Display, sync::PoisonError};
 use thiserror::Error;
@@ -30,8 +30,8 @@ pub enum DeviceFileError {
     FacilityTypeMismatch(#[from] facilities::FacilityTypeMismatch),
     #[error("Unregistred Facility: {0}")]
     UnregisteredFacility(String),
-    #[error("Attempt to downcast {0} into concrete implementation {1} failed")]
-    FacilityDowncastError(String, String),
+    #[error(transparent)]
+    FacilityError(#[from] FacilityError),
     #[error("Attempted to execute unsupported behavior: {0}")]
     UnsupportedBehavior(String),
 }

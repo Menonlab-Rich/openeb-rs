@@ -1,3 +1,4 @@
+pub mod device_macros;
 pub mod header;
 pub mod types;
 
@@ -488,21 +489,9 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
             .try_write()
             .map_err(|_| DeviceFileError::WriteLockError)?;
 
-        let mut stream = stream_facility
-            .as_any_mut()
-            .downcast_mut::<RREventStream<BUFFER_SIZE>>()
-            .ok_or(DeviceFileError::FacilityDowncastError(
-                "EventsStreamFaciliy".to_string(),
-                "RREventStream".to_string(),
-            ))?;
+        let decoder = facility_downcast_mut!(decoder_facility, Evt3Decoder)?;
 
-        let mut decoder = decoder_facility
-            .as_any_mut()
-            .downcast_mut::<Evt3Decoder>()
-            .ok_or(DeviceFileError::FacilityDowncastError(
-                "EventsStreamDecoderFacility".to_string(),
-                "RREventStreamDecoder".to_string(),
-            ))?;
+        let stream = facility_downcast_mut!(stream_facility, RREventStream<BUFFER_SIZE>)?;
 
         self.device.seek_to_timestamp(
             index.as_ref(),
@@ -513,6 +502,8 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
 
         Ok(())
     }
+
+    pub fn events_iter_dt(&mut self) {}
 }
 
 #[cfg(test)]

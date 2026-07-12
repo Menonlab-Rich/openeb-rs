@@ -8,6 +8,7 @@ use crossbeam::channel::Receiver;
 pub use macros::pack_facility;
 use macros::property;
 use std::collections::{HashMap, HashSet};
+use std::error::Error;
 use std::sync::{Arc, RwLock};
 use thiserror::Error;
 use utilities::buffer::PooledBuffer;
@@ -128,6 +129,8 @@ pub enum FacilityError {
     Processing(#[from] ProcessingError),
     #[error(transparent)]
     DecoderProtocol(#[from] DecoderProtocolViolation),
+    #[error("Invalid downcast from {0} to {1}")]
+    FacilityDowncastError(String, String),
 }
 
 pub type FacilityResult<T> = Result<T, FacilityError>;
