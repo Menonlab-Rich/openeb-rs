@@ -247,12 +247,12 @@ pub struct SystemInfo {
 }
 
 /// Shared methods all facilities must implement
-pub trait BaseFacility: Any {
+pub trait BaseFacility: Any + Send + Sync {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
-impl<T: Any + Sized> BaseFacility for T {
+impl<T: Any + Sized + Send + Sync> BaseFacility for T {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -285,7 +285,7 @@ pub trait AntiFlickerFacility: BaseFacility {
     }
 }
 
-pub trait BaseDecoderFacility {
+pub trait BaseDecoderFacility: BaseFacility {
     fn subscribe_to_protocol_violation(&mut self) -> Receiver<SharedError>;
 
     property! {
@@ -293,7 +293,7 @@ pub trait BaseDecoderFacility {
     }
 }
 
-pub trait DecoderFacility<T>: BaseDecoderFacility + BaseFacility {
+pub trait DecoderFacility<T>: BaseDecoderFacility {
     fn decode(&mut self, raw_data: &[u8]) -> FacilityResult<()>;
     fn add_decode_callback(&mut self, cb: Cb<&[T]>) -> FacilityResult<usize>;
 
