@@ -5,7 +5,7 @@ use crate::raw::stream::RREventStream;
 use crate::types::DeviceFileError;
 use macros::pack_facility;
 use openeb_core::hal::device::device::Device;
-use openeb_core::hal::facilities::{FacilityHandle, FacilityType};
+use openeb_core::hal::facilities::{self, FacilityHandle, FacilityType};
 use std::collections::HashMap;
 use std::io::{Seek, SeekFrom};
 use std::sync::Arc;
@@ -17,6 +17,14 @@ pub(crate) struct RawFileHandler<const N: usize> {
 }
 
 impl<const N: usize> RawFileHandler<N> {
+    pub(crate) fn new() -> Self {
+        Self {
+            header: Arc::new(Header::default()),
+            facilities: HashMap::default(),
+            header_end_pos: u64::default(),
+        }
+    }
+
     pub(crate) fn new_from_path(path: &str) -> Result<Self, DeviceFileError> {
         let mut file = std::fs::File::open(path)?;
 
@@ -64,6 +72,49 @@ impl<const N: usize> RawFileHandler<N> {
         );
 
         Ok(device)
+    }
+
+    pub(crate) fn try_open(&mut self, path: &str) -> Result<(), DeviceFileError> {
+        let mut file = std::fs::File::open(path)?;
+
+        let mut reader = std::io::BufReader::new(&mut file);
+        let header = Header::parse(&mut reader)?;
+        let header_end_pos = reader.stream_position()?;
+
+        drop(reader);
+        file.seek(SeekFrom::Start(header_end_pos))?;
+
+        let header = Arc::new(header);
+
+        let geometry = RawReaderGeometry::new(self.header.width as i32, self.header.height as i32);
+        self.register_facility(
+            FacilityType::GeometryFacility,
+            pack_facility!(ro GeometryFacility, geometry),
+        );
+
+        let hw_identification = RawReaderHWIdentification::new(header.clone());
+        self.register_facility(
+            FacilityType::HWIdentificationFacility,
+            pack_facility!(ro HWIdentificationFacility, hw_identification),
+        );
+
+        let stream = RREventStream::<N>::new(file);
+        self.register_facility(
+            FacilityType::EventsStreamFacility,
+            pack_facility!(mut EventsStreamFacility, stream),
+        );
+
+        let decoder = RREventStreamDecoder::new(&header, true);
+        self.register_facility(
+            FacilityType::EventsStreamDecoderFacility,
+            pack_facility!(mut EventsStreamDecoderFacility, decoder.clone()),
+        );
+        self.register_facility(
+            FacilityType::EventDecoderFacility,
+            pack_facility!(mut EventDecoderFacility, decoder),
+        );
+
+        Ok(())
     }
 
     pub(crate) fn header_end_pos(&self) -> u64 {

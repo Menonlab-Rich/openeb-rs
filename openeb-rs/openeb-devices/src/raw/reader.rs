@@ -5,25 +5,38 @@ use crate::raw::stream::RREventStream;
 use crate::types::{DeviceFileError, FileIndex};
 use crossbeam::channel::Receiver;
 use num_traits::ToPrimitive;
+use openeb_core::hal::device;
 use openeb_core::hal::device::device::Device;
 use openeb_core::hal::facilities::{
     EventDecoderFacilityHandle, EventsStreamDecoderFacilityHandle, EventsStreamFacility,
     EventsStreamFacilityHandle, FacilityError, FacilityType,
 };
-use openeb_core::hal::types::EventCD;
+use openeb_core::hal::types::{EventCD, EventExtTrigger};
 use std::sync::Arc;
 use utilities::buffer::PooledBuffer;
 
 pub struct RawFileReader<const BUFFER_SIZE: usize> {
     _device: RawFileHandler<BUFFER_SIZE>,
-    stream_handle: EventsStreamFacilityHandle,
-    decoder_handle: EventsStreamDecoderFacilityHandle,
-    _event_decoder_handle: EventDecoderFacilityHandle,
+    stream_handle: Option<EventsStreamFacilityHandle>,
+    decoder_handle: Option<EventsStreamDecoderFacilityHandle>,
+    event_decoder_handle: Option<EventDecoderFacilityHandle>,
     index: Option<Arc<FileIndex>>,
+    initialized: bool,
 }
 
 impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
-    pub fn try_open(file_path: &str, do_index: bool) -> Result<Self, DeviceFileError> {
+    pub fn new() -> Self {
+        let device = RawFileHandler::<BUFFER_SIZE>::new();
+        Self {
+            _device: device,
+            stream_handle: None,
+            decoder_handle: None,
+            event_decoder_handle: None,
+            index: None,
+            initialized: false,
+        }
+    }
+    pub fn try_from_file(file_path: &str, do_index: bool) -> Result<Self, DeviceFileError> {
         let device = RawFileHandler::<BUFFER_SIZE>::new_from_path(file_path)?;
 
         let index = match do_index {
@@ -36,50 +49,105 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
             false => None,
         };
 
-        let stream_handle: EventsStreamFacilityHandle = device
-            .get_facility(FacilityType::EventsStreamFacility)
-            .ok_or(DeviceFileError::UnsupportedFacility(
-                "EventsStreamFacility".to_string(),
-            ))?
-            .try_into()?;
+        let stream_handle: Option<EventsStreamFacilityHandle> = Some(
+            device
+                .get_facility(FacilityType::EventsStreamFacility)
+                .ok_or(DeviceFileError::UnsupportedFacility(
+                    "EventsStreamFacility".to_string(),
+                ))?
+                .try_into()?,
+        );
 
-        let decoder_handle: EventsStreamDecoderFacilityHandle = device
-            .get_facility(FacilityType::EventsStreamDecoderFacility)
-            .ok_or(DeviceFileError::UnsupportedFacility(
-                "EventsStreamDecoderFacility".to_string(),
-            ))?
-            .try_into()?;
+        let decoder_handle: Option<EventsStreamDecoderFacilityHandle> = Some(
+            device
+                .get_facility(FacilityType::EventsStreamDecoderFacility)
+                .ok_or(DeviceFileError::UnsupportedFacility(
+                    "EventsStreamDecoderFacility".to_string(),
+                ))?
+                .try_into()?,
+        );
 
-        let event_decoder_handle: EventDecoderFacilityHandle = device
-            .get_facility(FacilityType::EventDecoderFacility)
-            .ok_or(DeviceFileError::UnsupportedFacility(
-                "EventDecoderFacility".to_string(),
-            ))?
-            .try_into()?;
+        let event_decoder_handle: Option<EventDecoderFacilityHandle> = Some(
+            device
+                .get_facility(FacilityType::EventDecoderFacility)
+                .ok_or(DeviceFileError::UnsupportedFacility(
+                    "EventDecoderFacility".to_string(),
+                ))?
+                .try_into()?,
+        );
 
         Ok(Self {
             _device: device,
             stream_handle,
             decoder_handle,
-            _event_decoder_handle: event_decoder_handle,
+            event_decoder_handle,
             index,
+            initialized: true,
         })
     }
 
+    pub fn try_open(&mut self, file_path: &str, do_index: bool) -> Result<(), DeviceFileError> {
+        let device = &self._device;
+
+        self.index = match do_index {
+            true => Some(Arc::new(index::build_index(
+                file_path,
+                device.header_end_pos(),
+                1024 * 1024,
+            )?)),
+
+            false => None,
+        };
+
+        self.stream_handle = Some(
+            device
+                .get_facility(FacilityType::EventsStreamFacility)
+                .ok_or(DeviceFileError::UnsupportedFacility(
+                    "EventsStreamFacility".to_string(),
+                ))?
+                .try_into()?,
+        );
+
+        self.decoder_handle = Some(
+            device
+                .get_facility(FacilityType::EventsStreamDecoderFacility)
+                .ok_or(DeviceFileError::UnsupportedFacility(
+                    "EventsStreamDecoderFacility".to_string(),
+                ))?
+                .try_into()?,
+        );
+
+        self.event_decoder_handle = Some(
+            device
+                .get_facility(FacilityType::EventDecoderFacility)
+                .ok_or(DeviceFileError::UnsupportedFacility(
+                    "EventDecoderFacility".to_string(),
+                ))?
+                .try_into()?,
+        );
+
+        self.initialized = true;
+
+        Ok(())
+    }
+
     pub fn seek(&mut self, ts: u32) -> Result<(), DeviceFileError> {
+        if !self.initialized {
+            return Err(DeviceFileError::NotInitialized);
+        }
         let index = self
             .index
             .clone()
             .ok_or(DeviceFileError::UnsupportedBehavior(
                 "File must be indexed in order to use seek.".to_string(),
             ))?;
-        let mut stream_facility = self
-            .stream_handle
+        let stream_handle = self.get_stream_handle()?;
+        let decoder_handle = self.get_decoder_handle()?;
+        let mut stream_facility = stream_handle
             .as_ref()
             .try_write()
             .map_err(|_| DeviceFileError::WriteLockError)?;
-        let mut decoder_facility = self
-            .decoder_handle
+        let mut decoder_facility = decoder_handle
             .as_ref()
             .try_write()
             .map_err(|_| DeviceFileError::WriteLockError)?;
@@ -95,35 +163,69 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
         )
     }
 
+    pub fn seek_to_next_ext(&mut self) -> Result<(), DeviceFileError> {
+        let recv = self.ext_receiver()?;
+        loop {
+            let _ = self.load_batch(); // Load another batch
+            match recv.try_recv() {
+                Ok(evts) => self.seek(evts[0].t as u32),
+                Err(err) => Err(err.into()),
+            }?
+        }
+    }
+
     pub fn cd_receiver(&mut self) -> Result<Receiver<Arc<PooledBuffer<EventCD>>>, DeviceFileError> {
-        let mut stream_facility = self
-            .stream_handle
+        let stream_handle = self.get_stream_handle()?;
+        let event_decoder_handle = self.get_event_decoder_handle()?;
+        let mut stream_facility = stream_handle
             .as_ref()
             .try_write()
             .map_err(|_| DeviceFileError::WriteLockError)?;
 
-        let mut event_decoder_facility = self
-            ._event_decoder_handle
+        let mut event_decoder_facility = event_decoder_handle
             .as_ref()
             .try_write()
             .map_err(|_| DeviceFileError::WriteLockError)?;
 
         let stream = crate::facility_downcast_mut!(stream_facility, RREventStream<BUFFER_SIZE>)?;
 
-        let cd_receiver = event_decoder_facility.subscribe_to_event_buffer();
+        let cd_receiver = event_decoder_facility.subscribe_to_cd_events();
         stream.start()?;
         Ok(cd_receiver)
     }
 
-    pub fn load_batch(&mut self) -> Result<(), DeviceFileError> {
-        let mut stream_facility = self
-            .stream_handle
+    pub fn ext_receiver(
+        &mut self,
+    ) -> Result<Receiver<Arc<PooledBuffer<EventExtTrigger>>>, DeviceFileError> {
+        let stream_handle = self.get_stream_handle()?;
+        let event_decoder_handle = self.get_event_decoder_handle()?;
+        let mut stream_facility = stream_handle
             .as_ref()
             .try_write()
             .map_err(|_| DeviceFileError::WriteLockError)?;
 
-        let mut decoder_facility = self
-            .decoder_handle
+        let mut ext_evt_decoder_facility = event_decoder_handle
+            .as_ref()
+            .try_write()
+            .map_err(|_| DeviceFileError::WriteLockError)?;
+
+        let stream = crate::facility_downcast_mut!(stream_facility, RREventStream<BUFFER_SIZE>)?;
+
+        let ext_receiver = ext_evt_decoder_facility.subscribe_to_ext_events();
+        stream.start()?;
+
+        Ok(ext_receiver)
+    }
+
+    pub fn load_batch(&mut self) -> Result<(), DeviceFileError> {
+        let stream_handle = self.get_stream_handle()?;
+        let decoder_handle = self.get_decoder_handle()?;
+        let mut stream_facility = stream_handle
+            .as_ref()
+            .try_write()
+            .map_err(|_| DeviceFileError::WriteLockError)?;
+
+        let mut decoder_facility = decoder_handle
             .as_ref()
             .try_write()
             .map_err(|_| DeviceFileError::WriteLockError)?;
@@ -137,6 +239,29 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
     pub fn as_windows(&mut self) -> Result<EventWindowIterator, DeviceFileError> {
         let receiver = self.cd_receiver()?;
         Ok(EventWindowIterator::new(receiver))
+    }
+
+    fn assert_initialized(&self) -> Result<(), DeviceFileError> {
+        if !self.initialized {
+            return Err(DeviceFileError::NotInitialized);
+        }
+
+        return Ok(());
+    }
+
+    fn get_stream_handle(&self) -> Result<EventsStreamFacilityHandle, DeviceFileError> {
+        let _ = self.assert_initialized()?;
+        Ok(self.stream_handle.clone().unwrap())
+    }
+
+    fn get_event_decoder_handle(&self) -> Result<EventDecoderFacilityHandle, DeviceFileError> {
+        let _ = self.assert_initialized()?;
+        Ok(self.event_decoder_handle.clone().unwrap())
+    }
+
+    fn get_decoder_handle(&self) -> Result<EventsStreamDecoderFacilityHandle, DeviceFileError> {
+        let _ = self.assert_initialized()?;
+        Ok(self.decoder_handle.clone().unwrap())
     }
 }
 

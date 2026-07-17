@@ -84,7 +84,7 @@ fn test_read_and_decode_raw_evt3() -> TestResult {
     let mut decoder = decoder_handle.write().unwrap();
     let mut event_decoder = event_decoder_handle.write().unwrap();
 
-    let cd_receiver = event_decoder.subscribe_to_event_buffer();
+    let cd_receiver = event_decoder.subscribe_to_cd_events();
 
     stream.start().expect("Failed to start stream");
 
@@ -132,7 +132,7 @@ fn test_read_and_decode_raw_evt3() -> TestResult {
 #[test]
 fn test_raw_file_reader_requires_index_for_seek() -> TestResult {
     let file_path = sample_raw_path();
-    let mut reader = RawFileReader::<131_072>::try_open(
+    let mut reader = RawFileReader::<131_072>::try_from_file(
         file_path
             .to_str()
             .expect("A cargo manifest dir must be specified."),
@@ -151,7 +151,7 @@ fn test_raw_file_reader_requires_index_for_seek() -> TestResult {
 #[test]
 fn test_raw_file_reader_can_seek_when_indexed() -> TestResult {
     let file_path = sample_raw_path();
-    let mut reader = RawFileReader::<131_072>::try_open(
+    let mut reader = RawFileReader::<131_072>::try_from_file(
         file_path
             .to_str()
             .expect("A cargo manifest dir must be specified."),
@@ -166,7 +166,7 @@ fn test_raw_file_reader_can_seek_when_indexed() -> TestResult {
 #[test]
 fn test_raw_file_reader_load_batch_publishes_cd_events() -> TestResult {
     let file_path = sample_raw_path();
-    let mut reader = RawFileReader::<131_072>::try_open(
+    let mut reader = RawFileReader::<131_072>::try_from_file(
         file_path
             .to_str()
             .expect("A cargo manifest dir must be specified."),

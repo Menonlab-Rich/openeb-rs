@@ -236,8 +236,12 @@ impl BaseDecoderFacility for Evt2Decoder {
 }
 
 impl EventDecoderFacility for Evt2Decoder {
-    fn subscribe_to_event_buffer(&mut self) -> Receiver<Arc<PooledBuffer<EventCD>>> {
+    fn subscribe_to_cd_events(&mut self) -> Receiver<Arc<PooledBuffer<EventCD>>> {
         self.evt_dispatcher.subscribe_cd(2048)
+    }
+
+    fn subscribe_to_ext_events(&mut self) -> Receiver<Arc<PooledBuffer<EventExtTrigger>>> {
+        self.evt_dispatcher.subscribe_ext(2048)
     }
 
     fn add_event_buffer(&mut self, range: Arc<PooledBuffer<EventCD>>) {

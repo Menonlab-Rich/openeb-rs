@@ -8,7 +8,6 @@ use crossbeam::channel::Receiver;
 pub use macros::pack_facility;
 use macros::property;
 use std::collections::{HashMap, HashSet};
-use std::error::Error;
 use std::sync::{Arc, RwLock};
 use thiserror::Error;
 use utilities::buffer::PooledBuffer;
@@ -340,8 +339,9 @@ pub trait ERCModuleFacility: BaseFacility {
 }
 
 pub trait EventDecoderFacility: BaseFacility {
-    fn subscribe_to_event_buffer(&mut self) -> Receiver<Arc<PooledBuffer<EventCD>>>;
+    fn subscribe_to_cd_events(&mut self) -> Receiver<Arc<PooledBuffer<EventCD>>>;
     fn add_event_buffer(&mut self, range: Arc<PooledBuffer<EventCD>>);
+    fn subscribe_to_ext_events(&mut self) -> Receiver<Arc<PooledBuffer<EventExtTrigger>>>;
 }
 
 pub trait EventFrameDecoderFacility: BaseFacility {

@@ -2,7 +2,7 @@
 members = [
     "macros",
     "core",
-    "devices",
+    "openeb-devices",
     "local-proc-macros",
     "utilities",
 ]

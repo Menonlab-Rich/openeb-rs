@@ -59,12 +59,18 @@ impl RREventStreamDecoder {
 }
 
 impl EventDecoderFacility for RREventStreamDecoder {
-    fn subscribe_to_event_buffer(&mut self) -> Receiver<Arc<PooledBuffer<EventCD>>> {
-        self.inner.write().unwrap().subscribe_to_event_buffer()
+    fn subscribe_to_cd_events(&mut self) -> Receiver<Arc<PooledBuffer<EventCD>>> {
+        self.inner.write().unwrap().subscribe_to_cd_events()
     }
 
     fn add_event_buffer(&mut self, range: Arc<PooledBuffer<EventCD>>) {
         self.inner.write().unwrap().add_event_buffer(range)
+    }
+
+    fn subscribe_to_ext_events(
+        &mut self,
+    ) -> Receiver<Arc<PooledBuffer<openeb_core::hal::types::EventExtTrigger>>> {
+        self.inner.write().unwrap().subscribe_to_ext_events()
     }
 }
 

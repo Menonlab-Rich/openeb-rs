@@ -91,19 +91,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "devices"
-version = "0.1.0"
-dependencies = [
- "crossbeam",
- "macros",
- "num-traits",
- "openeb-core",
- "regex",
- "thiserror",
- "utilities",
-]
-
-[[package]]
 name = "local-proc-macros"
 version = "0.1.0"
 dependencies = [
@@ -151,6 +138,19 @@ dependencies = [
  "log",
  "macros",
  "paste",
+ "thiserror",
+ "utilities",
+]
+
+[[package]]
+name = "openeb-devices"
+version = "0.1.0"
+dependencies = [
+ "crossbeam",
+ "macros",
+ "num-traits",
+ "openeb-core",
+ "regex",
  "thiserror",
  "utilities",
 ]

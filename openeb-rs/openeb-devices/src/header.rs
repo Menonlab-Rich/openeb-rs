@@ -3,7 +3,7 @@ use openeb_core::hal::facilities::SensorInfo;
 use std::collections::HashMap;
 use std::io::BufRead;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Header {
     pub format: FileFormat,
     pub width: u32,

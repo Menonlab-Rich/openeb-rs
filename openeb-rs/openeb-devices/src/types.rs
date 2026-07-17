@@ -1,3 +1,4 @@
+use crossbeam::channel::TryRecvError;
 use macros::derive_value;
 use openeb_core::hal::{
     decoders::evt3::{DecoderTimingState, Evt3Decoder},
@@ -12,6 +13,8 @@ use thiserror::Error;
 pub enum DeviceFileError {
     #[error("IO Error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("Try Recv Error: {0}")]
+    TryRecv(#[from] TryRecvError),
     #[error("Unsupported format: {0}")]
     Format(String),
     #[error("Could not find geometry in header")]
@@ -34,6 +37,8 @@ pub enum DeviceFileError {
     FacilityError(#[from] FacilityError),
     #[error("Attempted to execute unsupported behavior: {0}")]
     UnsupportedBehavior(String),
+    #[error("Method called on unitialized device!")]
+    NotInitialized,
 }
 
 #[derive_value]
@@ -45,6 +50,11 @@ pub enum FileFormat {
     UNKNOWN,
 }
 
+impl Default for FileFormat {
+    fn default() -> Self {
+        FileFormat::EVT3
+    }
+}
 impl Display for FileFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

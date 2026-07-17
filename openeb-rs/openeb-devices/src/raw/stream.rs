@@ -8,6 +8,7 @@ pub(crate) struct RREventStream<const N: usize> {
     file: File,
     buffer: RawEventBuffer<N>,
     eof: bool,
+    started: bool,
 }
 
 impl<const N: usize> RREventStream<N> {
@@ -16,6 +17,7 @@ impl<const N: usize> RREventStream<N> {
             file,
             buffer: RawEventBuffer::<N>::new(),
             eof: false,
+            started: false,
         }
     }
 
@@ -28,14 +30,19 @@ impl<const N: usize> RREventStream<N> {
 
 impl<const N: usize> EventsStreamFacility for RREventStream<N> {
     fn start(&mut self) -> FacilityResult<()> {
+        self.started = true;
         Ok(())
     }
 
     fn stop(&mut self) -> FacilityResult<()> {
+        self.started = false;
         Ok(())
     }
 
     fn poll_buffer(&mut self) -> FacilityResult<(&[u8], usize)> {
+        if !self.started {
+            return Err(FacilityError::Stream(StreamError::Disconnected));
+        }
         self.wait_next_buffer()
     }
 
