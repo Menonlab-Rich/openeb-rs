@@ -6,7 +6,7 @@ mod reader;
 mod stream;
 
 pub use decoder::RREventStreamDecoder;
-pub use reader::RawFileReader;
+pub use reader::{EventWindowIterator, RawFileReader};
 
 #[cfg(test)]
 mod tests;

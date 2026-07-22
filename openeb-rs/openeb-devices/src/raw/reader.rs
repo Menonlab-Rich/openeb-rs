@@ -5,7 +5,6 @@ use crate::raw::stream::RREventStream;
 use crate::types::{DeviceFileError, FileIndex};
 use crossbeam::channel::Receiver;
 use num_traits::ToPrimitive;
-use openeb_core::hal::device;
 use openeb_core::hal::device::device::Device;
 use openeb_core::hal::facilities::{
     EventDecoderFacilityHandle, EventsStreamDecoderFacilityHandle, EventsStreamFacility,
@@ -22,6 +21,12 @@ pub struct RawFileReader<const BUFFER_SIZE: usize> {
     event_decoder_handle: Option<EventDecoderFacilityHandle>,
     index: Option<Arc<FileIndex>>,
     initialized: bool,
+}
+
+impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
+    pub fn ready(&self) -> bool {
+        self.stream_handle.is_some()
+    }
 }
 
 impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
@@ -87,6 +92,7 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
     }
 
     pub fn try_open(&mut self, file_path: &str, do_index: bool) -> Result<(), DeviceFileError> {
+        self._device.try_open(file_path)?;
         let device = &self._device;
 
         self.index = match do_index {
@@ -238,7 +244,8 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
 
     pub fn as_windows(&mut self) -> Result<EventWindowIterator, DeviceFileError> {
         let receiver = self.cd_receiver()?;
-        Ok(EventWindowIterator::new(receiver))
+        let shape = self._device.shape();
+        Ok(EventWindowIterator::new(receiver, shape))
     }
 
     fn assert_initialized(&self) -> Result<(), DeviceFileError> {
@@ -271,15 +278,21 @@ pub struct EventWindowIterator {
     internal_buffer: std::collections::VecDeque<EventCD>,
     // Tracks the current temporal baseline for slicing fixed delta-t windows
     current_timestamp: Option<u64>,
+    shape: (u32, u32),
 }
 
 impl EventWindowIterator {
-    pub fn new(receiver: Receiver<Arc<PooledBuffer<EventCD>>>) -> Self {
+    pub fn new(receiver: Receiver<Arc<PooledBuffer<EventCD>>>, shape: (u32, u32)) -> Self {
         Self {
             receiver,
             internal_buffer: std::collections::VecDeque::new(),
             current_timestamp: None,
+            shape,
         }
+    }
+
+    pub fn shape(&self) -> (u32, u32) {
+        self.shape
     }
 
     /// Fills the internal queue from the channel if it runs empty

@@ -5,7 +5,7 @@ use crate::raw::stream::RREventStream;
 use crate::types::DeviceFileError;
 use macros::pack_facility;
 use openeb_core::hal::device::device::Device;
-use openeb_core::hal::facilities::{self, FacilityHandle, FacilityType};
+use openeb_core::hal::facilities::{FacilityHandle, FacilityType};
 use std::collections::HashMap;
 use std::io::{Seek, SeekFrom};
 use std::sync::Arc;
@@ -23,6 +23,10 @@ impl<const N: usize> RawFileHandler<N> {
             facilities: HashMap::default(),
             header_end_pos: u64::default(),
         }
+    }
+
+    pub(crate) fn shape(&self) -> (u32, u32) {
+        (self.header.height, self.header.width)
     }
 
     pub(crate) fn new_from_path(path: &str) -> Result<Self, DeviceFileError> {
@@ -85,8 +89,11 @@ impl<const N: usize> RawFileHandler<N> {
         file.seek(SeekFrom::Start(header_end_pos))?;
 
         let header = Arc::new(header);
+        self.header = header.clone();
+        self.header_end_pos = header_end_pos;
+        self.facilities.clear();
 
-        let geometry = RawReaderGeometry::new(self.header.width as i32, self.header.height as i32);
+        let geometry = RawReaderGeometry::new(header.width as i32, header.height as i32);
         self.register_facility(
             FacilityType::GeometryFacility,
             pack_facility!(ro GeometryFacility, geometry),

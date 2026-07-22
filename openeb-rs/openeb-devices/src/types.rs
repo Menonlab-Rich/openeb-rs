@@ -1,5 +1,6 @@
 use crossbeam::channel::TryRecvError;
 use macros::derive_value;
+pub use openeb_core::hal::types::{EventCD, EventExtTrigger};
 use openeb_core::hal::{
     decoders::evt3::{DecoderTimingState, Evt3Decoder},
     facilities::{self, FacilityError},

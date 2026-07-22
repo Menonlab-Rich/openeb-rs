@@ -32,18 +32,20 @@ pub(crate) fn build_index(
             break;
         }
 
-        let words = buffer[..bytes_read].chunks_exact(2);
-        for chunk in words {
+        for chunk in buffer[..bytes_read].chunks_exact(2) {
             let word = u16::from_le_bytes([chunk[0], chunk[1]]);
 
             let msb = (word >> 12) as u8;
             match msb {
                 0b0110 => {
                     decoder._set_time_low((word & 0x0FFF).into());
-                    let _ = decoder.current_timestamp();
                 }
                 0b1000 => {
                     decoder._set_time_high((word & 0x0FFF).into());
+                }
+                // Match the EVT3 decoder's timestamp sampling points. TimeLow and
+                // TimeHigh words only update clock state; event words consume it.
+                0b0010 | 0b0100 | 0b0101 | 0b1010 => {
                     let _ = decoder.current_timestamp();
                 }
                 _ => {}

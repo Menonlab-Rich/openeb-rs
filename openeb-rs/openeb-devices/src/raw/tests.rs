@@ -164,6 +164,22 @@ fn test_raw_file_reader_can_seek_when_indexed() -> TestResult {
 }
 
 #[test]
+fn test_raw_file_reader_can_open_after_default_construction() -> TestResult {
+    let file_path = sample_raw_path();
+    let mut reader = RawFileReader::<131_072>::new();
+
+    reader.try_open(
+        file_path
+            .to_str()
+            .expect("A cargo manifest dir must be specified."),
+        true,
+    )?;
+    reader.seek(0)?;
+
+    Ok(())
+}
+
+#[test]
 fn test_raw_file_reader_load_batch_publishes_cd_events() -> TestResult {
     let file_path = sample_raw_path();
     let mut reader = RawFileReader::<131_072>::try_from_file(
