@@ -1,17 +1,19 @@
+use crate::EventWindowIterator;
 use crate::raw::decoder::RREventStreamDecoder;
 use crate::raw::device::RawFileHandler;
-use crate::raw::index;
 use crate::raw::stream::RREventStream;
+use crate::raw::{IterUnconfigured, index};
 use crate::types::{DeviceFileError, FileIndex};
-use crossbeam::channel::Receiver;
+use crossbeam::channel::{Receiver, Sender};
 use num_traits::ToPrimitive;
 use openeb_core::hal::device::device::Device;
 use openeb_core::hal::facilities::{
-    EventDecoderFacilityHandle, EventsStreamDecoderFacilityHandle, EventsStreamFacility,
-    EventsStreamFacilityHandle, FacilityError, FacilityType,
+    EventDecoderFacilityHandle, EventsStreamDecoderFacility, EventsStreamDecoderFacilityHandle,
+    EventsStreamFacility, EventsStreamFacilityHandle, FacilityError, FacilityType,
 };
 use openeb_core::hal::types::{EventCD, EventExtTrigger};
-use std::sync::Arc;
+use std::marker::PhantomData;
+use std::sync::{Arc, RwLock};
 use utilities::buffer::PooledBuffer;
 
 pub struct RawFileReader<const BUFFER_SIZE: usize> {
@@ -242,10 +244,19 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
         Ok(())
     }
 
-    pub fn as_windows(&mut self) -> Result<EventWindowIterator, DeviceFileError> {
+    pub fn as_windows(
+        &mut self,
+    ) -> Result<EventWindowIterator<BUFFER_SIZE, IterUnconfigured>, DeviceFileError> {
         let receiver = self.cd_receiver()?;
+        let decoder_handle = self.get_decoder_handle()?;
+        let stream_handle = self.get_stream_handle()?;
         let shape = self._device.shape();
-        Ok(EventWindowIterator::new(receiver, shape))
+        Ok(EventWindowIterator::<BUFFER_SIZE>::new(
+            receiver,
+            shape,
+            stream_handle,
+            decoder_handle,
+        ))
     }
 
     fn assert_initialized(&self) -> Result<(), DeviceFileError> {
@@ -269,113 +280,5 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
     fn get_decoder_handle(&self) -> Result<EventsStreamDecoderFacilityHandle, DeviceFileError> {
         let _ = self.assert_initialized()?;
         Ok(self.decoder_handle.clone().unwrap())
-    }
-}
-
-pub struct EventWindowIterator {
-    receiver: Receiver<Arc<PooledBuffer<EventCD>>>,
-    // Holds leftover events extracted from PooledBuffers that haven't been consumed yet
-    internal_buffer: std::collections::VecDeque<EventCD>,
-    // Tracks the current temporal baseline for slicing fixed delta-t windows
-    current_timestamp: Option<u64>,
-    shape: (u32, u32),
-}
-
-impl EventWindowIterator {
-    pub fn new(receiver: Receiver<Arc<PooledBuffer<EventCD>>>, shape: (u32, u32)) -> Self {
-        Self {
-            receiver,
-            internal_buffer: std::collections::VecDeque::new(),
-            current_timestamp: None,
-            shape,
-        }
-    }
-
-    pub fn shape(&self) -> (u32, u32) {
-        self.shape
-    }
-
-    /// Fills the internal queue from the channel if it runs empty
-    fn replenish_buffer(&mut self) -> Result<(), DeviceFileError> {
-        if self.internal_buffer.is_empty() {
-            // Block until a new chunk arrives or channel disconnects
-            if let Ok(pooled_buffer) = self.receiver.recv() {
-                // Assuming PooledBuffer implements AsRef<[EventCD]> or can be iterated over
-                self.internal_buffer
-                    .extend(pooled_buffer.as_ref().iter().cloned());
-            }
-        }
-        Ok(())
-    }
-
-    /// Pulls events until the specified count is hit
-    pub fn next_batch(&mut self, size: usize) -> Result<Vec<EventCD>, DeviceFileError> {
-        let mut batch = Vec::with_capacity(size);
-
-        while batch.len() < size {
-            if self.internal_buffer.is_empty() {
-                self.replenish_buffer()?;
-                if self.internal_buffer.is_empty() {
-                    break; // Stream ended
-                }
-            }
-
-            if let Some(event) = self.internal_buffer.pop_front() {
-                // Establish initial time anchoring if needed
-                if self.current_timestamp.is_none() {
-                    self.current_timestamp = Some(event.t as u64);
-                }
-                batch.push(event);
-            }
-        }
-
-        Ok(batch)
-    }
-
-    /// Pulls all events falling within a specific delta-t window
-    pub fn next_delta(&mut self, dt: u64) -> Result<Vec<EventCD>, DeviceFileError> {
-        // 1. Ensure we have at least one event to establish a time anchor
-        if self.internal_buffer.is_empty() {
-            self.replenish_buffer()?;
-        }
-
-        let start_ts = match self.current_timestamp {
-            Some(ts) => ts,
-            None => {
-                if let Some(first_ev) = self.internal_buffer.front() {
-                    let ts = first_ev.t as u64;
-                    self.current_timestamp = Some(ts);
-                    ts
-                } else {
-                    return Ok(Vec::new()); // No data available
-                }
-            }
-        };
-
-        let end_ts = start_ts + dt;
-        let mut window_events = Vec::new();
-
-        loop {
-            if self.internal_buffer.is_empty() {
-                self.replenish_buffer()?;
-                if self.internal_buffer.is_empty() {
-                    break; // Stream ended
-                }
-            }
-
-            // Peek at the next item to check timestamp bounds
-            if let Some(event) = self.internal_buffer.front() {
-                if (event.t as u64) < end_ts {
-                    window_events.push(self.internal_buffer.pop_front().unwrap());
-                } else {
-                    // Reached the next window frame boundary
-                    break;
-                }
-            }
-        }
-
-        // Slide window baseline forward
-        self.current_timestamp = Some(end_ts);
-        Ok(window_events)
     }
 }

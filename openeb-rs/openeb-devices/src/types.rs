@@ -42,6 +42,9 @@ pub enum DeviceFileError {
     NotInitialized,
 }
 
+#[derive(Error, Debug)]
+pub enum IteratorError {}
+
 #[derive_value]
 pub enum FileFormat {
     EVT2,

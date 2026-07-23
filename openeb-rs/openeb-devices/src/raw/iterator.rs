@@ -1,0 +1,202 @@
+use std::{
+    marker::PhantomData,
+    sync::{Arc, RwLock},
+};
+
+use crossbeam::channel::Receiver;
+use openeb_core::hal::{
+    facilities::{EventsStreamDecoderFacility, EventsStreamFacility, FacilityError},
+    types::EventCD,
+};
+use utilities::buffer::PooledBuffer;
+
+use crate::{raw::stream::RREventStream, types::DeviceFileError};
+
+pub struct IterSync;
+pub struct IterAsync;
+pub struct IterUnconfigured;
+
+pub struct EventWindowIterator<const BUFFER_SIZE: usize, State = IterUnconfigured> {
+    stream_handle: Arc<RwLock<dyn EventsStreamFacility + Send + 'static>>,
+    decoder_handle: Arc<RwLock<dyn EventsStreamDecoderFacility + Send + 'static>>,
+    receiver: Receiver<Arc<PooledBuffer<EventCD>>>,
+    // Holds leftover events extracted from PooledBuffers that haven't been consumed yet
+    internal_buffer: std::collections::VecDeque<EventCD>,
+    // Tracks the current temporal baseline for slicing fixed delta-t windows
+    current_timestamp: Option<u64>,
+    shape: (u32, u32),
+    _state: PhantomData<State>,
+}
+
+impl<const BUFFER_SIZE: usize> EventWindowIterator<BUFFER_SIZE, IterUnconfigured> {
+    pub fn new(
+        receiver: Receiver<Arc<PooledBuffer<EventCD>>>,
+        shape: (u32, u32),
+        stream_handle: Arc<RwLock<dyn EventsStreamFacility + Send + 'static>>,
+        decoder_handle: Arc<RwLock<dyn EventsStreamDecoderFacility + Send + 'static>>,
+    ) -> Self {
+        Self {
+            stream_handle,
+            receiver,
+            internal_buffer: std::collections::VecDeque::new(),
+            current_timestamp: None,
+            shape,
+            decoder_handle,
+            _state: PhantomData,
+        }
+    }
+    pub fn into_sync(self) -> EventWindowIterator<BUFFER_SIZE, IterSync> {
+        EventWindowIterator {
+            stream_handle: self.stream_handle,
+            decoder_handle: self.decoder_handle,
+            receiver: self.receiver,
+            internal_buffer: self.internal_buffer,
+            current_timestamp: self.current_timestamp,
+            shape: self.shape,
+            _state: PhantomData,
+        }
+    }
+
+    pub fn into_async(self) -> EventWindowIterator<BUFFER_SIZE, IterAsync> {
+        EventWindowIterator {
+            stream_handle: self.stream_handle,
+            decoder_handle: self.decoder_handle,
+            receiver: self.receiver,
+            internal_buffer: self.internal_buffer,
+            current_timestamp: self.current_timestamp,
+            shape: self.shape,
+            _state: PhantomData,
+        }
+    }
+}
+
+pub trait BufferReplenisher {
+    fn replenish_buffer(&mut self) -> Result<(), DeviceFileError>;
+}
+
+// ASYNC MODE: Just waits for an external thread to feed the channel
+impl<const BUFFER_SIZE: usize> BufferReplenisher for EventWindowIterator<BUFFER_SIZE, IterAsync> {
+    fn replenish_buffer(&mut self) -> Result<(), DeviceFileError> {
+        if self.internal_buffer.is_empty() {
+            self.drain_channel_once();
+        }
+        Ok(())
+    }
+}
+
+// SYNC MODE: Loads the batch locally first, then consumes the channel
+impl<const BUFFER_SIZE: usize> BufferReplenisher for EventWindowIterator<BUFFER_SIZE, IterSync> {
+    fn replenish_buffer(&mut self) -> Result<(), DeviceFileError> {
+        if self.internal_buffer.is_empty() {
+            self.load_batch()?;
+            self.drain_channel_once();
+        }
+        Ok(())
+    }
+}
+
+// Generic implementation block for ALL states
+impl<const BUFFER_SIZE: usize, State> EventWindowIterator<BUFFER_SIZE, State> {
+    pub fn shape(&self) -> (u32, u32) {
+        self.shape
+    }
+
+    /// Internal logic for reading channel data into internal_buffer
+    fn drain_channel_once(&mut self) {
+        if let Ok(pooled_buffer) = self.receiver.recv() {
+            self.internal_buffer
+                .extend(pooled_buffer.as_ref().iter().cloned());
+        }
+    }
+
+    pub fn next_batch(&mut self) -> Result<Vec<EventCD>, DeviceFileError>
+    where
+        Self: BufferReplenisher,
+    {
+        let mut batch = Vec::with_capacity(BUFFER_SIZE);
+
+        while batch.len() < BUFFER_SIZE {
+            if self.internal_buffer.is_empty() {
+                self.replenish_buffer()?;
+                if self.internal_buffer.is_empty() {
+                    break; // Stream ended
+                }
+            }
+
+            if let Some(event) = self.internal_buffer.pop_front() {
+                if self.current_timestamp.is_none() {
+                    self.current_timestamp = Some(event.t as u64);
+                }
+                batch.push(event);
+            }
+        }
+
+        Ok(batch)
+    }
+
+    pub fn next_delta(&mut self, dt: u64) -> Result<Vec<EventCD>, DeviceFileError>
+    where
+        Self: BufferReplenisher,
+    {
+        if self.internal_buffer.is_empty() {
+            self.replenish_buffer()?;
+        }
+
+        let start_ts = match self.current_timestamp {
+            Some(ts) => ts,
+            None => {
+                if let Some(first_ev) = self.internal_buffer.front() {
+                    let ts = first_ev.t as u64;
+                    self.current_timestamp = Some(ts);
+                    ts
+                } else {
+                    return Ok(Vec::new());
+                }
+            }
+        };
+
+        let end_ts = start_ts + dt;
+        let mut window_events = Vec::new();
+
+        loop {
+            if self.internal_buffer.is_empty() {
+                self.replenish_buffer()?;
+                if self.internal_buffer.is_empty() {
+                    break;
+                }
+            }
+
+            if let Some(event) = self.internal_buffer.front() {
+                if (event.t as u64) < end_ts {
+                    window_events.push(self.internal_buffer.pop_front().unwrap());
+                } else {
+                    break;
+                }
+            }
+        }
+
+        self.current_timestamp = Some(end_ts);
+        Ok(window_events)
+    }
+}
+
+impl<const BUFFER_SIZE: usize> EventWindowIterator<BUFFER_SIZE, IterSync> {
+    pub fn load_batch(&mut self) -> Result<(), DeviceFileError> {
+        let mut stream_facility = self
+            .stream_handle
+            .as_ref()
+            .try_write()
+            .map_err(|_| DeviceFileError::WriteLockError)?;
+
+        let mut decoder_facility = self
+            .decoder_handle
+            .as_ref()
+            .try_write()
+            .map_err(|_| DeviceFileError::WriteLockError)?;
+
+        let stream = crate::facility_downcast_mut!(stream_facility, RREventStream<BUFFER_SIZE>)?;
+        let (buffer, _) = stream.poll_buffer()?;
+        decoder_facility.decode(buffer)?;
+        Ok(())
+    }
+}
