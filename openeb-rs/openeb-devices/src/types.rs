@@ -129,6 +129,8 @@ pub struct IndexMarker {
 
 #[derive(Clone, Debug, Default)]
 pub struct FileIndex {
+    pub t_min: usize,
+    pub t_max: usize,
     pub markers: Vec<IndexMarker>,
 }
 

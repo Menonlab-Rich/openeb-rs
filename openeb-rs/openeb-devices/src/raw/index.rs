@@ -63,8 +63,13 @@ pub(crate) fn build_index(
             last_marked_offset = current_byte_offset;
         }
     }
-
-    Ok(FileIndex { markers })
+    let t_min = decoder.get_timestamp_shift().unwrap_or(0);
+    let t_max = decoder.get_last_timestamp();
+    Ok(FileIndex {
+        markers,
+        t_min,
+        t_max,
+    })
 }
 
 pub(crate) fn seek_to_timestamp<const N: usize>(

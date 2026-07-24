@@ -1,9 +1,9 @@
+use crate::EventWindowIterator;
 use crate::raw::decoder::RREventStreamDecoder;
 use crate::raw::device::RawFileHandler;
 use crate::raw::stream::RREventStream;
-use crate::raw::{index, IterUnconfigured};
+use crate::raw::{IterUnconfigured, index};
 use crate::types::{DeviceFileError, FileIndex};
-use crate::EventWindowIterator;
 use crossbeam::channel::Receiver;
 use num_traits::ToPrimitive;
 use openeb_core::hal::device::device::Device;
@@ -136,6 +136,22 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
         self.initialized = true;
 
         Ok(())
+    }
+
+    pub fn t_min(&self) -> Option<usize> {
+        if let Some(index) = &self.index {
+            return Some(index.t_min);
+        }
+
+        None
+    }
+
+    pub fn t_max(&self) -> Option<usize> {
+        if let Some(index) = &self.index {
+            return Some(index.t_max);
+        }
+
+        None
     }
 
     pub fn seek(&mut self, ts: u32) -> Result<(), DeviceFileError> {
