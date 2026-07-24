@@ -1,19 +1,18 @@
-use crate::EventWindowIterator;
 use crate::raw::decoder::RREventStreamDecoder;
 use crate::raw::device::RawFileHandler;
 use crate::raw::stream::RREventStream;
-use crate::raw::{IterUnconfigured, index};
+use crate::raw::{index, IterUnconfigured};
 use crate::types::{DeviceFileError, FileIndex};
-use crossbeam::channel::{Receiver, Sender};
+use crate::EventWindowIterator;
+use crossbeam::channel::Receiver;
 use num_traits::ToPrimitive;
 use openeb_core::hal::device::device::Device;
 use openeb_core::hal::facilities::{
-    EventDecoderFacilityHandle, EventsStreamDecoderFacility, EventsStreamDecoderFacilityHandle,
-    EventsStreamFacility, EventsStreamFacilityHandle, FacilityError, FacilityType,
+    EventDecoderFacilityHandle, EventsStreamDecoderFacilityHandle, EventsStreamFacility,
+    EventsStreamFacilityHandle, FacilityError, FacilityType,
 };
 use openeb_core::hal::types::{EventCD, EventExtTrigger};
-use std::marker::PhantomData;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use utilities::buffer::PooledBuffer;
 
 pub struct RawFileReader<const BUFFER_SIZE: usize> {

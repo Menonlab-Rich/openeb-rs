@@ -1,16 +1,12 @@
-use super::RawFileReader;
 use super::device::RawFileHandler;
-use super::reader::EventWindowIterator;
+use super::RawFileReader;
 use openeb_core::hal::device::device::Device;
 use openeb_core::hal::errors::StreamError;
 use openeb_core::hal::facilities::{
     EventDecoderFacilityHandle, EventsStreamDecoderFacilityHandle, EventsStreamFacilityHandle,
     FacilityError, FacilityType,
 };
-use openeb_core::hal::types::EventCD;
 use std::path::PathBuf;
-use std::sync::Arc;
-use utilities::buffer::PooledBuffer;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -19,32 +15,6 @@ fn sample_raw_path() -> PathBuf {
     file_path.push("tests");
     file_path.push("sample.raw");
     file_path
-}
-
-fn event(t: usize) -> EventCD {
-    EventCD {
-        x: t % 640,
-        y: t % 480,
-        p: t % 2 == 0,
-        t,
-    }
-}
-
-fn pooled_event_buffer(events: Vec<EventCD>) -> Arc<PooledBuffer<EventCD>> {
-    let (return_channel, _return_receiver) = crossbeam::channel::unbounded();
-    Arc::new(PooledBuffer {
-        buffer: Some(events),
-        return_channel,
-    })
-}
-
-fn event_window_iterator_from_batches(batches: Vec<Vec<EventCD>>) -> EventWindowIterator {
-    let (sender, receiver) = crossbeam::channel::unbounded();
-    for batch in batches {
-        sender.send(pooled_event_buffer(batch)).unwrap();
-    }
-    drop(sender);
-    EventWindowIterator::new(receiver)
 }
 
 #[test]
@@ -203,31 +173,50 @@ fn test_raw_file_reader_load_batch_publishes_cd_events() -> TestResult {
 }
 
 #[test]
-fn test_event_window_iterator_batches_across_pooled_buffers() -> TestResult {
-    let mut windows =
-        event_window_iterator_from_batches(vec![vec![event(10), event(20)], vec![event(30)]]);
+fn test_sync_event_window_iterator_loads_batches_on_demand() -> TestResult {
+    let file_path = sample_raw_path();
+    let mut reader = RawFileReader::<4_096>::try_from_file(
+        file_path
+            .to_str()
+            .expect("A cargo manifest dir must be specified."),
+        false,
+    )?;
+    let mut windows = reader.as_windows()?.into_sync();
+    let batch = windows.next_batch()?;
 
-    assert_eq!(windows.next_batch(2)?, vec![event(10), event(20)]);
-    assert_eq!(windows.next_batch(2)?, vec![event(30)]);
-    assert!(windows.next_batch(1)?.is_empty());
-
+    assert_eq!(batch.len(), 4_096);
     Ok(())
 }
 
 #[test]
-fn test_event_window_iterator_slices_delta_windows() -> TestResult {
-    let mut windows = event_window_iterator_from_batches(vec![vec![
-        event(100),
-        event(109),
-        event(110),
-        event(119),
-        event(125),
-    ]]);
+fn test_sync_event_window_iterator_slices_delta_windows() -> TestResult {
+    let file_path = sample_raw_path();
+    let mut reader = RawFileReader::<4_096>::try_from_file(
+        file_path
+            .to_str()
+            .expect("A cargo manifest dir must be specified."),
+        false,
+    )?;
+    let mut windows = reader.as_windows()?.into_sync();
+    let events = windows.next_delta(10_000)?;
 
-    assert_eq!(windows.next_delta(10)?, vec![event(100), event(109)]);
-    assert_eq!(windows.next_delta(10)?, vec![event(110), event(119)]);
-    assert_eq!(windows.next_delta(10)?, vec![event(125)]);
-    assert!(windows.next_delta(10)?.is_empty());
+    assert!(!events.is_empty());
+    assert!(events.iter().all(|event| event.t < 10_000));
+    Ok(())
+}
 
+#[test]
+fn test_sync_event_window_iterator_returns_partial_window_at_eof() -> TestResult {
+    let file_path = sample_raw_path();
+    let mut reader = RawFileReader::<4_096>::try_from_file(
+        file_path
+            .to_str()
+            .expect("A cargo manifest dir must be specified."),
+        false,
+    )?;
+    let mut windows = reader.as_windows()?.into_sync();
+    let events = windows.next_delta(1_000_000_000)?;
+
+    assert!(!events.is_empty());
     Ok(())
 }

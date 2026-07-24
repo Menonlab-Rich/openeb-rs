@@ -5,6 +5,7 @@ use std::{
 
 use crossbeam::channel::Receiver;
 use openeb_core::hal::{
+    errors::StreamError,
     facilities::{EventsStreamDecoderFacility, EventsStreamFacility, FacilityError},
     types::EventCD,
 };
@@ -88,8 +89,9 @@ impl<const BUFFER_SIZE: usize> BufferReplenisher for EventWindowIterator<BUFFER_
 impl<const BUFFER_SIZE: usize> BufferReplenisher for EventWindowIterator<BUFFER_SIZE, IterSync> {
     fn replenish_buffer(&mut self) -> Result<(), DeviceFileError> {
         if self.internal_buffer.is_empty() {
-            self.load_batch()?;
-            self.drain_channel_once();
+            while !self.try_drain_channel_once() {
+                self.load_batch()?;
+            }
         }
         Ok(())
     }
@@ -109,6 +111,21 @@ impl<const BUFFER_SIZE: usize, State> EventWindowIterator<BUFFER_SIZE, State> {
         }
     }
 
+    /// Drains one already-decoded batch without blocking.
+    ///
+    /// Sync iterators must check the receiver before loading more raw data because
+    /// a single raw buffer can decode into several pooled event batches.
+    fn try_drain_channel_once(&mut self) -> bool {
+        match self.receiver.try_recv() {
+            Ok(pooled_buffer) => {
+                self.internal_buffer
+                    .extend(pooled_buffer.as_ref().iter().cloned());
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
     pub fn next_batch(&mut self) -> Result<Vec<EventCD>, DeviceFileError>
     where
         Self: BufferReplenisher,
@@ -117,7 +134,12 @@ impl<const BUFFER_SIZE: usize, State> EventWindowIterator<BUFFER_SIZE, State> {
 
         while batch.len() < BUFFER_SIZE {
             if self.internal_buffer.is_empty() {
-                self.replenish_buffer()?;
+                if let Err(error) = self.replenish_buffer() {
+                    if !batch.is_empty() && is_end_of_file(&error) {
+                        break;
+                    }
+                    return Err(error);
+                }
                 if self.internal_buffer.is_empty() {
                     break; // Stream ended
                 }
@@ -160,7 +182,12 @@ impl<const BUFFER_SIZE: usize, State> EventWindowIterator<BUFFER_SIZE, State> {
 
         loop {
             if self.internal_buffer.is_empty() {
-                self.replenish_buffer()?;
+                if let Err(error) = self.replenish_buffer() {
+                    if !window_events.is_empty() && is_end_of_file(&error) {
+                        break;
+                    }
+                    return Err(error);
+                }
                 if self.internal_buffer.is_empty() {
                     break;
                 }
@@ -178,6 +205,14 @@ impl<const BUFFER_SIZE: usize, State> EventWindowIterator<BUFFER_SIZE, State> {
         self.current_timestamp = Some(end_ts);
         Ok(window_events)
     }
+}
+
+fn is_end_of_file(error: &DeviceFileError) -> bool {
+    matches!(
+        error,
+        DeviceFileError::EOF()
+            | DeviceFileError::FacilityError(FacilityError::Stream(StreamError::EndOfFile))
+    )
 }
 
 impl<const BUFFER_SIZE: usize> EventWindowIterator<BUFFER_SIZE, IterSync> {
