@@ -59,6 +59,12 @@ impl<const N: usize> RawFileHandler<N> {
             pack_facility!(ro HWIdentificationFacility, hw_identification),
         );
 
+        let roi = RawReaderROI::default();
+        device.register_facility(
+            FacilityType::ROIFacility,
+            pack_facility!(mut ROIFacility, roi),
+        );
+
         let stream = RREventStream::<N>::new(file);
         device.register_facility(
             FacilityType::EventsStreamFacility,

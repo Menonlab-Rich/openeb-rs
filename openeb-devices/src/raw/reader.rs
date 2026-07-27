@@ -20,7 +20,7 @@ use num_traits::ToPrimitive;
 use openeb_core::hal::device::device::Device;
 use openeb_core::hal::facilities::{
     EventDecoderFacilityHandle, EventsStreamDecoderFacilityHandle, EventsStreamFacility,
-    EventsStreamFacilityHandle, FacilityError, FacilityType, ROIFacility, ROIFacilityHandle,
+    EventsStreamFacilityHandle, FacilityError, FacilityType, ROIFacilityHandle,
 };
 use openeb_core::hal::types::{EventCD, EventExtTrigger};
 use std::sync::Arc;
@@ -235,11 +235,12 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
     pub fn seek_to_next_ext(&mut self) -> Result<(), DeviceFileError> {
         let recv = self.ext_receiver()?;
         loop {
-            let _ = self.load_batch(); // Load another batch
+            self.load_batch()?;
             match recv.try_recv() {
-                Ok(evts) => self.seek(evts[0].t as u32),
-                Err(err) => Err(err.into()),
-            }?
+                Ok(evts) if !evts.is_empty() => return self.seek(evts[0].t as u32),
+                Ok(_) => continue,
+                Err(err) => return Err(DeviceFileError::TryRecv(err)),
+            }
         }
     }
 

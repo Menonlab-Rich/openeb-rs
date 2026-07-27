@@ -50,10 +50,10 @@ impl Header {
         let mut height: Option<String> = None;
         for (i, p) in parts.enumerate() {
             match i {
-                0 => format_str = Some(p.to_string()),
-                1 => width = Some(p.to_string()),
-                2 => height = Some(p.to_string()),
-                _ => panic!("This should never happen"),
+                0 => format_str = Some(p.trim().to_string()),
+                1 => width = Some(p.trim().to_string()),
+                2 => height = Some(p.trim().to_string()),
+                _ => unreachable!("splitn(3, ';') cannot produce more than three parts"),
             }
         }
 
@@ -67,8 +67,8 @@ impl Header {
             _ => FileFormat::UNKNOWN,
         };
 
-        if let Some(w) = width {
-            metadata.insert("Geometry".to_string(), format!("{},{}", w, height.unwrap()));
+        if let (Some(w), Some(h)) = (width, height) {
+            metadata.insert("Geometry".to_string(), format!("{},{}", w, h));
         }
 
         let geometry_str = metadata
@@ -141,5 +141,73 @@ pub fn sensor_info_from_header(header: &Header) -> SensorInfo {
         name,
         integrator,
         version,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    fn parse(input: &str) -> Result<Header, DeviceFileError> {
+        Header::parse(&mut Cursor::new(input.as_bytes()))
+    }
+
+    #[test]
+    fn parses_colon_metadata_and_evt3_geometry() {
+        let header = parse(
+            "%Data format: EVT3; 640; 480\n% sensor_name: Test Sensor\n%integrator_name: ACME\n%generation: 3\n\nraw",
+        )
+        .unwrap();
+
+        assert_eq!(header.format, FileFormat::EVT3);
+        assert_eq!((header.width, header.height), (640, 480));
+        assert_eq!(header.metadata["Geometry"], "640,480");
+        assert_eq!(sensor_info_from_header(&header).name, "Test Sensor");
+        assert_eq!(sensor_info_from_header(&header).version, "3");
+    }
+
+    #[test]
+    fn parses_whitespace_metadata_and_keyed_geometry() {
+        let header = parse("% format EVT2\n% Geometry: width=12,height=34\ndata").unwrap();
+
+        assert_eq!(header.format, FileFormat::EVT2);
+        assert_eq!((header.width, header.height), (12, 34));
+    }
+
+    #[test]
+    fn leaves_data_at_the_start_of_the_reader() {
+        let mut reader = Cursor::new(b"%Geometry: 2,3\n\x01\x02".to_vec());
+        let header = Header::parse(&mut reader).unwrap();
+
+        assert_eq!((header.width, header.height), (2, 3));
+        assert_eq!(reader.position(), b"%Geometry: 2,3\n".len() as u64);
+        assert_eq!(&reader.get_ref()[reader.position() as usize..], &[1, 2]);
+    }
+
+    #[test]
+    fn rejects_missing_or_malformed_geometry_without_panicking() {
+        assert!(matches!(
+            parse("%Data format: EVT3; 640\n"),
+            Err(DeviceFileError::UnknownGeometry())
+        ));
+        assert!(matches!(
+            parse("%Geometry: 640\n"),
+            Err(DeviceFileError::UnknownGeometry())
+        ));
+        assert!(matches!(
+            parse("%Geometry: width=640,height=bad\n"),
+            Err(DeviceFileError::GeometryParsing(_))
+        ));
+    }
+
+    #[test]
+    fn uses_defaults_for_missing_sensor_metadata() {
+        let header = parse("%Geometry: 1,2\n").unwrap();
+        let info = sensor_info_from_header(&header);
+
+        assert_eq!(info.name, "UNKNOWN");
+        assert_eq!(info.integrator, "UNKNOWN");
+        assert_eq!(info.version, "x.x");
     }
 }

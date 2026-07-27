@@ -175,11 +175,53 @@ impl FileIndex {
                 // If not found, `idx` is the piece where it *would* be inserted.
                 // We want the marker right before it.
                 if idx == 0 {
-                    Some(&self.markers[0])
+                    None
                 } else {
                     Some(&self.markers[idx - 1])
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_event_buffer_is_zeroed_and_resizes_in_both_directions() {
+        let mut source = RawEventBuffer::<4>::new();
+        source.copy_from_slice(&[1, 2, 3, 4]);
+
+        let larger = source.resize::<6>();
+        assert_eq!(larger.as_ref(), &[1, 2, 3, 4, 0, 0]);
+
+        let smaller = larger.resize::<2>();
+        assert_eq!(smaller.as_ref(), &[1, 2]);
+        assert_eq!(RawEventBuffer::<3>::new().as_ref(), &[0, 0, 0]);
+    }
+
+    #[test]
+    fn index_lookup_returns_only_markers_at_or_before_target() {
+        let index = FileIndex {
+            markers: vec![
+                IndexMarker {
+                    byte_offset: 0,
+                    timestamp: 10,
+                    state: DecoderTimingState::default(),
+                },
+                IndexMarker {
+                    byte_offset: 20,
+                    timestamp: 20,
+                    state: DecoderTimingState::default(),
+                },
+            ],
+            ..FileIndex::default()
+        };
+
+        assert!(index.find_closest_marker(9).is_none());
+        assert_eq!(index.find_closest_marker(10).unwrap().byte_offset, 0);
+        assert_eq!(index.find_closest_marker(19).unwrap().byte_offset, 0);
+        assert_eq!(index.find_closest_marker(99).unwrap().byte_offset, 20);
     }
 }

@@ -1,12 +1,18 @@
-use super::device::RawFileHandler;
 use super::RawFileReader;
+use super::device::RawFileHandler;
+use super::stream::RREventStream;
 use openeb_core::hal::device::device::Device;
 use openeb_core::hal::errors::StreamError;
+use openeb_core::hal::facilities::EventsStreamFacility;
 use openeb_core::hal::facilities::{
     EventDecoderFacilityHandle, EventsStreamDecoderFacilityHandle, EventsStreamFacilityHandle,
     FacilityError, FacilityType,
 };
+use openeb_core::hal::types::EventCD;
+use std::fs::File;
+use std::io::Write;
 use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -115,6 +121,139 @@ fn test_raw_file_reader_requires_index_for_seek() -> TestResult {
         "Expected UnsupportedBehavior, got {err:?}"
     );
 
+    Ok(())
+}
+
+#[test]
+fn default_reader_rejects_operations_until_opened() {
+    let mut reader = RawFileReader::<128>::new();
+
+    assert!(!reader.ready());
+    assert_eq!(reader.shape(), (0, 0));
+    assert!(matches!(
+        reader.load_batch(),
+        Err(crate::types::DeviceFileError::NotInitialized)
+    ));
+    assert!(matches!(
+        reader.cd_receiver(),
+        Err(crate::types::DeviceFileError::NotInitialized)
+    ));
+    assert!(matches!(
+        reader.roi(),
+        Err(crate::types::DeviceFileError::UnsupportedFacility(_))
+    ));
+    assert!(matches!(
+        reader.seek(0),
+        Err(crate::types::DeviceFileError::NotInitialized)
+    ));
+}
+
+#[test]
+fn opened_reader_exposes_geometry_and_roi_facilities() -> TestResult {
+    let path = sample_raw_path();
+    let reader = RawFileReader::<131_072>::try_from_file(path.to_str().unwrap(), false)?;
+
+    assert!(reader.ready());
+    assert_eq!(reader.shape(), (720, 1280));
+
+    let roi = reader.roi()?;
+    let mut roi = roi.write().unwrap();
+    assert!(!roi.get_enabled()?);
+    roi.set_enabled(true)?;
+    roi.set_roi((1, 2, 3, 4))?;
+    assert!(roi.get_enabled()?);
+    assert_eq!(roi.roi(), Some((1, 2, 3, 4)));
+
+    Ok(())
+}
+
+#[test]
+fn stream_requires_start_and_reports_eof_until_repositioned() -> TestResult {
+    let path = std::env::temp_dir().join(format!("openeb-stream-{}", std::process::id()));
+    {
+        let mut file = File::create(&path)?;
+        file.write_all(&[10, 20, 30])?;
+    }
+    let file = File::open(&path)?;
+    let mut stream = RREventStream::<2>::new(file);
+
+    assert!(matches!(
+        stream.poll_buffer(),
+        Err(FacilityError::Stream(StreamError::Disconnected))
+    ));
+    stream.start()?;
+    assert_eq!(stream.poll_buffer()?.1, 2);
+    assert_eq!(stream.poll_buffer()?.1, 1);
+    assert!(matches!(
+        stream.poll_buffer(),
+        Err(FacilityError::Stream(StreamError::EndOfFile))
+    ));
+    assert!(matches!(
+        stream.wait_next_buffer(),
+        Err(FacilityError::Stream(StreamError::EndOfFile))
+    ));
+    stream.seek_to_offset(0)?;
+    assert_eq!(stream.poll_buffer()?.0, &[10, 20]);
+    stream.stop()?;
+    assert!(matches!(
+        stream.poll_buffer(),
+        Err(FacilityError::Stream(StreamError::Disconnected))
+    ));
+
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+fn sync_iterator_caps_batches_and_preserves_leftovers() -> TestResult {
+    let (sender, receiver) = crossbeam::channel::unbounded();
+    let (return_sender, _) = crossbeam::channel::unbounded();
+    let buffer = utilities::buffer::PooledBuffer {
+        buffer: Some(vec![
+            EventCD {
+                x: 1,
+                y: 2,
+                p: true,
+                t: 10,
+            },
+            EventCD {
+                x: 3,
+                y: 4,
+                p: false,
+                t: 11,
+            },
+            EventCD {
+                x: 5,
+                y: 6,
+                p: true,
+                t: 12,
+            },
+        ]),
+        return_channel: return_sender,
+    };
+    sender.send(Arc::new(buffer))?;
+    drop(sender);
+
+    let stream: Arc<RwLock<dyn EventsStreamFacility + Send>> = Arc::new(RwLock::new(
+        RREventStream::<2>::new(File::open(sample_raw_path())?),
+    ));
+    let decoder: Arc<RwLock<dyn openeb_core::hal::facilities::EventsStreamDecoderFacility + Send>> =
+        Arc::new(RwLock::new(crate::raw::decoder::RREventStreamDecoder::new(
+            &crate::header::Header {
+                format: crate::types::FileFormat::EVT3,
+                width: 1280,
+                height: 720,
+                metadata: Default::default(),
+            },
+            true,
+        )));
+    let mut iter =
+        super::iterator::EventWindowIterator::<2>::new(receiver, (720, 1280), stream, decoder)
+            .into_async();
+
+    assert_eq!(iter.next_batch()?.len(), 2);
+    assert_eq!(iter.next_batch()?.len(), 1);
+    assert!(iter.next_batch()?.is_empty());
     Ok(())
 }
 
