@@ -99,7 +99,7 @@ Notable gaps:
 
 - `openeb-core/src/camera.rs` still contains a `todo!()` and is not usable yet.
 - `RREventStreamDecoder` supports `EVT3` today; the `EVT2`, `DAT`, and `HDF5` branches are still `todo!()`.
-- `openeb-core/src/hal/decoders/evt2.rs` is present but appears unfinished and may not compile as-is.
+- `openeb-core/src/hal/decoders/evt2.rs` is present but unfinished.
 - Several facility definitions in `openeb-core/src/hal/facilities.rs` are scaffolding or placeholders.
 - The code currently assumes raw files with a header format understood by `header.rs`.
 
