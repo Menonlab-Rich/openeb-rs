@@ -61,4 +61,4 @@ mod raw;
 pub mod types;
 
 #[cfg(feature = "devices")]
-pub use raw::{EventWindowIterator, RREventStreamDecoder, RawFileReader};
+pub use raw::{EventWindowIterator, RREventStreamDecoder, RawFileHandler, RawFileReader};

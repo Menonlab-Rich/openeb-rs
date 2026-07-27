@@ -34,6 +34,28 @@ The primary modules are:
   and reader/iterator APIs. Its main types are also re-exported at the crate
   root when the `devices` feature is enabled.
 
+## Using `RawFileHandler`
+
+`RawFileHandler` is the low-level, facility-oriented API for a raw event file.
+It parses the header and exposes the file's geometry, hardware metadata, ROI,
+event stream, and decoder through the HAL device interface. The const generic
+sets the stream read-buffer size:
+
+```rust,no_run
+use openeb::RawFileHandler;
+use openeb::hal::device::device::Device;
+use openeb::hal::facilities::FacilityType;
+
+let device = RawFileHandler::<131_072>::new_from_path("events.raw")?;
+let geometry = device
+    .get_facility(FacilityType::GeometryFacility)
+    .expect("raw files provide geometry");
+```
+
+For decoded event batches, indexing, seeking, and subscriptions, use
+`RawFileReader` instead. EVT3 decoding is currently supported; EVT2, DAT, and
+HDF5 decoder paths are not yet implemented.
+
 The `property!` and `pack_facility!` macros, along with the `new` derive
 re-export, now live directly in the crate. The previous standalone macro and
 procedural-macro packages are no longer needed.

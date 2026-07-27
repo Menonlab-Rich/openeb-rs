@@ -2,21 +2,49 @@ use crate::header::Header;
 use crate::raw::decoder::RREventStreamDecoder;
 use crate::raw::facilities::{RawReaderGeometry, RawReaderHWIdentification, RawReaderROI};
 use crate::raw::stream::RREventStream;
-use crate::types::DeviceFileError;
+use crate::types::{DeviceFileError, FileFormat};
 use openeb_core::hal::device::device::Device;
 use openeb_core::hal::facilities::{FacilityHandle, FacilityType};
 use std::collections::HashMap;
 use std::io::{Seek, SeekFrom};
 use std::sync::Arc;
 
-pub(crate) struct RawFileHandler<const N: usize> {
+/// A file-backed OpenEB device exposing the facilities found in a raw event
+/// file.
+///
+/// `RawFileHandler` parses the file header and registers geometry, hardware
+/// identification, ROI, event-stream, and decoder facilities. The const
+/// generic `N` controls the size, in bytes, of each read from the event
+/// stream. Larger buffers can reduce I/O overhead, while smaller buffers use
+/// less memory.
+///
+/// The handler implements [`Device`]. Retrieve facilities with
+/// [`Device::get_facility`] and convert the returned [`FacilityHandle`] into
+/// the corresponding typed handle.
+///
+/// This is the low-level device API. Applications that only need decoded
+/// events will generally prefer [`crate::RawFileReader`].
+pub struct RawFileHandler<const N: usize> {
     header: Arc<Header>,
     facilities: HashMap<FacilityType, FacilityHandle>,
     header_end_pos: u64,
 }
 
 impl<const N: usize> RawFileHandler<N> {
-    pub(crate) fn new() -> Self {
+    fn ensure_supported_format(format: FileFormat) -> Result<(), DeviceFileError> {
+        if format == FileFormat::EVT3 {
+            Ok(())
+        } else {
+            Err(DeviceFileError::Format(format.to_string()))
+        }
+    }
+
+    /// Creates an empty handler without an open file.
+    ///
+    /// Use [`Self::try_open`] to populate the handler before requesting file
+    /// facilities. The empty state is useful when a handler needs to be
+    /// allocated before the input path is known.
+    pub fn new() -> Self {
         Self {
             header: Arc::new(Header::default()),
             facilities: HashMap::default(),
@@ -24,15 +52,24 @@ impl<const N: usize> RawFileHandler<N> {
         }
     }
 
-    pub(crate) fn shape(&self) -> (u32, u32) {
+    /// Returns the sensor dimensions as `(height, width)` in pixels.
+    ///
+    /// An empty handler returns `(0, 0)`.
+    pub fn shape(&self) -> (u32, u32) {
         (self.header.height, self.header.width)
     }
 
-    pub(crate) fn new_from_path(path: &str) -> Result<Self, DeviceFileError> {
+    /// Opens `path`, parses its header, and registers the file-backed
+    /// facilities.
+    ///
+    /// Currently, event decoding is implemented for EVT3 files. Other raw
+    /// formats may parse successfully but are not yet decodable.
+    pub fn new_from_path(path: &str) -> Result<Self, DeviceFileError> {
         let mut file = std::fs::File::open(path)?;
 
         let mut reader = std::io::BufReader::new(&mut file);
         let header = Header::parse(&mut reader)?;
+        Self::ensure_supported_format(header.format)?;
         let header_end_pos = reader.stream_position()?;
 
         drop(reader);
@@ -83,11 +120,16 @@ impl<const N: usize> RawFileHandler<N> {
         Ok(device)
     }
 
-    pub(crate) fn try_open(&mut self, path: &str) -> Result<(), DeviceFileError> {
+    /// Opens `path` in an existing handler, replacing its current file and
+    /// facilities.
+    ///
+    /// If opening or parsing fails, the existing handler remains unchanged.
+    pub fn try_open(&mut self, path: &str) -> Result<(), DeviceFileError> {
         let mut file = std::fs::File::open(path)?;
 
         let mut reader = std::io::BufReader::new(&mut file);
         let header = Header::parse(&mut reader)?;
+        Self::ensure_supported_format(header.format)?;
         let header_end_pos = reader.stream_position()?;
 
         drop(reader);

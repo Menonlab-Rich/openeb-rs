@@ -102,3 +102,4 @@ vcpkg_installed/
 Testing/
 .cache/
 
+.ccls-cache

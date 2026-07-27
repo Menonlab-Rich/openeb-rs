@@ -7,6 +7,7 @@ mod reader;
 mod stream;
 
 pub use decoder::RREventStreamDecoder;
+pub use device::RawFileHandler;
 pub use iterator::*;
 pub use reader::RawFileReader;
 
