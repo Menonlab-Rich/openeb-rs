@@ -13,12 +13,17 @@ use std::sync::{Arc, RwLock};
 use utilities::buffer::PooledBuffer;
 
 #[derive(Clone)]
+/// Facility-backed decoder for the event format declared by a raw-file header.
 pub struct RREventStreamDecoder {
     inner: Arc<RwLock<Box<dyn RawFormatDecoder + Send + Sync>>>,
+    /// Format selected from the input header.
     pub event_format: FileFormat,
 }
 
 impl RREventStreamDecoder {
+    /// Creates a decoder for a parsed header.
+    ///
+    /// `do_time_shift` controls whether decoder timestamps are normalized.
     pub fn new(header: &Header, do_time_shift: bool) -> Self {
         let decoder: Box<dyn RawFormatDecoder + Send + Sync> = match header.format {
             FileFormat::EVT3 => Box::new(Evt3Decoder::new(

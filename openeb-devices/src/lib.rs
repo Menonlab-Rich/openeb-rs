@@ -13,7 +13,9 @@
 //! The public API is built on top of the `openeb-core` facility
 //! model so that file-backed devices look like other devices in the workspace.
 
+/// Internal macros used to downcast facility handles.
 pub mod device_macros;
+/// Raw-file header parsing and sensor metadata helpers.
 pub mod header;
 mod raw;
 pub mod types;

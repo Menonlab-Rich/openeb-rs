@@ -18,30 +18,43 @@ use thiserror::Error;
 /// Errors that can occur while opening or reading a raw event file.
 #[derive(Error, Debug)]
 pub enum DeviceFileError {
+    /// The underlying file operation failed.
     #[error("IO Error: {0}")]
     Io(#[from] std::io::Error),
+    /// Reading a decoded-event channel failed without blocking.
     #[error("Try Recv Error: {0}")]
     TryRecv(#[from] TryRecvError),
+    /// The file format is not supported by the requested operation.
     #[error("Unsupported format: {0}")]
     Format(String),
+    /// The header did not contain a usable sensor geometry.
     #[error("Could not find geometry in header")]
     UnknownGeometry(),
+    /// A geometry value could not be parsed as an integer.
     #[error("Could not parse geometry as an integer: {0}")]
     GeometryParsing(#[from] std::num::ParseIntError),
+    /// The input stream reached its end.
     #[error("End of file reached")]
     EOF(),
+    /// The device does not expose a required facility.
     #[error("Unsupported facility: {0}")]
     UnsupportedFacility(String),
+    /// A facility lock could not be acquired.
     #[error("Lock was poisoned")]
     LockError,
+    /// A facility handle had an unexpected concrete type.
     #[error("Facility Error: {0}")]
     FacilityTypeMismatch(#[from] facilities::FacilityTypeMismatch),
+    /// A requested facility was not registered.
     #[error("Unregistred Facility: {0}")]
     UnregisteredFacility(String),
+    /// A lower-level facility operation failed.
     #[error(transparent)]
     FacilityError(#[from] FacilityError),
+    /// The requested operation is not supported for this reader.
     #[error("Attempted to execute unsupported behavior: {0}")]
     UnsupportedBehavior(String),
+    /// The reader was used before a file was opened.
     #[error("Method called on unitialized device!")]
     NotInitialized,
 }
@@ -58,10 +71,15 @@ pub enum IteratorError {}
 /// The default is `EVT3` because that is the currently supported decoder path.
 #[derive_value]
 pub enum FileFormat {
+    /// EVT 2.0 event stream.
     EVT2,
+    /// EVT 3.0 event stream.
     EVT3,
+    /// DAT event stream.
     DAT,
+    /// HDF5 event data.
     HDF5,
+    /// An unrecognized format.
     UNKNOWN,
 }
 
@@ -88,7 +106,9 @@ impl Display for FileFormat {
 /// enum or replace it with a more direct abstraction if additional formats are
 /// added.
 pub enum FormatDecoder {
+    /// EVT3 decoder implementation.
     Evt3(Evt3Decoder),
+    /// No decoder is available for the format.
     Unknown,
 }
 
@@ -142,8 +162,11 @@ impl<const N: usize> RawEventBuffer<N> {
 /// Marker describing a point in the file index.
 #[derive(Clone, Debug)]
 pub struct IndexMarker {
+    /// Byte offset at which decoding can resume.
     pub byte_offset: u64,
+    /// Timestamp represented by this marker.
     pub timestamp: usize,
+    /// Decoder timing state at the marker.
     pub state: DecoderTimingState,
 }
 
@@ -154,8 +177,11 @@ pub struct IndexMarker {
 /// continuing.
 #[derive(Clone, Debug, Default)]
 pub struct FileIndex {
+    /// Earliest timestamp in the indexed file.
     pub t_min: usize,
+    /// Latest timestamp in the indexed file.
     pub t_max: usize,
+    /// Sorted seek markers sampled from the file.
     pub markers: Vec<IndexMarker>,
 }
 

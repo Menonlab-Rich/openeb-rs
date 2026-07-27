@@ -23,8 +23,11 @@ use utilities::buffer::PooledBuffer;
 
 use crate::{raw::stream::RREventStream, types::DeviceFileError};
 
+/// Type-state marker for an iterator that loads raw data synchronously.
 pub struct IterSync;
+/// Type-state marker for an iterator fed by another thread.
 pub struct IterAsync;
+/// Type-state marker for an iterator not yet configured for a mode.
 pub struct IterUnconfigured;
 
 /// Consumes decoded CD events in batch or time-window form.
@@ -243,6 +246,7 @@ fn is_end_of_file(error: &DeviceFileError) -> bool {
 }
 
 impl<const BUFFER_SIZE: usize> EventWindowIterator<BUFFER_SIZE, IterSync> {
+    /// Loads and decodes one raw buffer into the iterator's event channel.
     pub fn load_batch(&mut self) -> Result<(), DeviceFileError> {
         let mut stream_facility = self
             .stream_handle

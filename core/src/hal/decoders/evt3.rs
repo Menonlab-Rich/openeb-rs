@@ -599,10 +599,15 @@ impl EventDecoderFacility for Evt3Decoder {
 /// Snapshot of the EVT3 decoder timing state.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DecoderTimingState {
+    /// Reconstructed high-order timestamp component.
     pub time_high: usize,
+    /// Reconstructed low-order timestamp component.
     pub time_low: usize,
+    /// Applied timestamp shift.
     pub time_offset: usize,
+    /// Last 24-bit timestamp observed.
     pub last_t24: usize,
+    /// Last complete timestamp observed.
     pub last_t: usize,
 }
 

@@ -14,6 +14,7 @@ pub use local_proc_macros::derive_value;
 pub use paste;
 
 #[macro_export]
+/// Declares getter/setter methods for facility properties.
 macro_rules! property {
     // Match read-only properties: `ro identifier: type;`
     (ro $name:ident : $ty:ty ; $($rest:tt)*) => {
@@ -37,6 +38,7 @@ macro_rules! property {
 }
 
 #[macro_export]
+/// Wraps a concrete facility in the matching `FacilityHandle` variant.
 macro_rules! pack_facility {
     // Matches mutable facilities and applies Arc<Mutex<...>>
     (mut $variant:ident, $instance:expr) => {

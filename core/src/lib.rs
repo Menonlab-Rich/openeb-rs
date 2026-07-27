@@ -15,4 +15,5 @@
 //! heterogeneous set of capabilities while keeping ownership, mutability, and
 //! thread-safety explicit in the API.
 
+/// Hardware-abstraction-layer types and facility interfaces.
 pub mod hal;

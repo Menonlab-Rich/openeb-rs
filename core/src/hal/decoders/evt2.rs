@@ -17,17 +17,22 @@ use crate::hal::types::{EventCD, EventExtTrigger};
 
 /// Decoder for EVT2 raw event streams.
 pub struct Evt2Decoder {
+    /// Publishes decoded events to subscribers.
     pub evt_dispatcher: Arc<EventDispatcher>,
+    /// Publishes decoder errors and protocol violations.
     pub err_dispatcher: Arc<ErrorDispatcher>,
 
     // Time tracking
     first_ts: Option<usize>,
     last_t: usize,
     time_high: u32,
+    /// Whether timestamps are shifted to begin at zero.
     pub do_time_shift: bool,
 
     // Geometry
+    /// Maximum valid horizontal coordinate.
     pub max_x: u16,
+    /// Maximum valid vertical coordinate.
     pub max_y: u16,
 
     // Buffers and Pools

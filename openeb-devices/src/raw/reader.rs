@@ -26,6 +26,7 @@ use openeb_core::hal::types::{EventCD, EventExtTrigger};
 use std::sync::Arc;
 use utilities::buffer::PooledBuffer;
 
+/// Reads and decodes an event-camera raw file.
 pub struct RawFileReader<const BUFFER_SIZE: usize> {
     _device: RawFileHandler<BUFFER_SIZE>,
     stream_handle: Option<EventsStreamFacilityHandle>,
@@ -309,6 +310,9 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
         Ok(())
     }
 
+    /// Creates an unconfigured iterator over decoded CD event windows.
+    /// Configure it with [`EventWindowIterator::into_sync`] or
+    /// [`EventWindowIterator::into_async`] before consuming events.
     pub fn as_windows(
         &mut self,
     ) -> Result<EventWindowIterator<BUFFER_SIZE, IterUnconfigured>, DeviceFileError> {
@@ -324,6 +328,7 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
         ))
     }
 
+    /// Returns the sensor dimensions `(width, height)` from the file header.
     pub fn shape(&self) -> (u32, u32) {
         self._device.shape()
     }

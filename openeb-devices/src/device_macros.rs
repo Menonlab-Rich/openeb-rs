@@ -1,4 +1,5 @@
 #[macro_export]
+/// Downcasts a facility guard to a concrete facility type.
 macro_rules! facility_downcast {
     ($facility:expr, $target_type:ty) => {
         $facility
@@ -14,6 +15,7 @@ macro_rules! facility_downcast {
 }
 
 #[macro_export]
+/// Mutably downcasts a facility guard to a concrete facility type.
 macro_rules! facility_downcast_mut {
     ($facility:expr, $target_type:ty) => {
         $facility

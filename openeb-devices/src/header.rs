@@ -4,14 +4,20 @@ use std::collections::HashMap;
 use std::io::BufRead;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// Metadata and geometry parsed from a raw event-file header.
 pub struct Header {
+    /// Detected event-file format.
     pub format: FileFormat,
+    /// Sensor width in pixels.
     pub width: u32,
+    /// Sensor height in pixels.
     pub height: u32,
+    /// All metadata entries found in the header.
     pub metadata: HashMap<String, String>,
 }
 
 impl Header {
+    /// Parses header lines from `reader`, leaving the first raw-data byte unread.
     pub fn parse<R: BufRead>(reader: &mut R) -> Result<Header, DeviceFileError> {
         let mut metadata = HashMap::new();
 
@@ -122,6 +128,7 @@ impl Header {
     }
 }
 
+/// Builds core sensor information from the corresponding raw-file header.
 pub fn sensor_info_from_header(header: &Header) -> SensorInfo {
     let name = header
         .metadata
