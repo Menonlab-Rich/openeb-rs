@@ -1,6 +1,6 @@
 [package]
 name = "openeb-rs"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["Rich Baird <rich@rbaird.me>"]
 description = "A rust implementation of the openeb repository by Prophesee.ai"
