@@ -6,6 +6,7 @@ authors = ["Rich Baird <rich@rbaird.me>"]
 description = "A rust implementation of the openeb repository by Prophesee.ai"
 license = "MIT" # Choose an appropriate open-source license
 repository = "https://github.com/richbai90/openeb-rs"
+documentation = "https://docs.rs/openeb-rs"
 
 [features]
 default = ["all"]
