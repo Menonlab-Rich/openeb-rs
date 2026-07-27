@@ -1,10 +1,70 @@
+//! File-backed implementations of core HAL facilities.
+//!
+//! These types adapt metadata found in a raw file header into the facility
+//! interfaces expected by `openeb-core`. They are intentionally minimal and only
+//! expose what can be derived directly from the file contents.
+
 use crate::header::{Header, sensor_info_from_header};
-use openeb_core::hal::facilities::{
-    ConnectionType, FacilityResult, GeometryFacility, HWIdentificationFacility, SensorInfo,
-    SystemInfo,
+use openeb_core::hal::{
+    facilities::{
+        ConnectionType, FacilityResult, GeometryFacility, HWIdentificationFacility, ROIFacility,
+        SensorInfo, SystemInfo,
+    },
+    types::Region,
 };
 use std::sync::Arc;
 
+/// File-backed ROI facility.
+///
+/// TODO: confirm whether raw files are expected to preserve ROI state or merely
+/// expose a writable placeholder implementation.
+#[derive(Clone)]
+pub(crate) struct RawReaderROI {
+    enabled: bool,
+    roi_: Option<Region>,
+    rois_: Option<Vec<Region>>,
+}
+
+impl Default for RawReaderROI {
+    fn default() -> Self {
+        Self {
+            enabled: Default::default(),
+            roi_: Default::default(),
+            rois_: Default::default(),
+        }
+    }
+}
+
+impl ROIFacility for RawReaderROI {
+    fn get_enabled(&self) -> FacilityResult<bool> {
+        Ok(self.enabled)
+    }
+
+    fn set_enabled(&mut self, value: bool) -> FacilityResult<()> {
+        self.enabled = value;
+        Ok(())
+    }
+
+    fn set_roi(&mut self, region: openeb_core::hal::types::Region) -> FacilityResult<()> {
+        self.roi_ = Some(region);
+        Ok(())
+    }
+
+    fn set_rois(&mut self, regions: &[openeb_core::hal::types::Region]) -> FacilityResult<()> {
+        self.rois_ = Some(regions.to_vec());
+        Ok(())
+    }
+
+    fn roi(&self) -> Option<Region> {
+        self.roi_
+    }
+
+    fn rois(&self) -> Option<&[Region]> {
+        self.rois_.as_deref()
+    }
+}
+
+/// File-backed geometry facility backed by header dimensions.
 pub(crate) struct RawReaderGeometry {
     width: i32,
     height: i32,
@@ -26,6 +86,7 @@ impl GeometryFacility for RawReaderGeometry {
     }
 }
 
+/// File-backed hardware-identification facility backed by header metadata.
 pub(crate) struct RawReaderHWIdentification {
     header: Arc<Header>,
 }

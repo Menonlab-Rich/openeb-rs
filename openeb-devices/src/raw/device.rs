@@ -1,6 +1,6 @@
 use crate::header::Header;
 use crate::raw::decoder::RREventStreamDecoder;
-use crate::raw::facilities::{RawReaderGeometry, RawReaderHWIdentification};
+use crate::raw::facilities::{RawReaderGeometry, RawReaderHWIdentification, RawReaderROI};
 use crate::raw::stream::RREventStream;
 use crate::types::DeviceFileError;
 use macros::pack_facility;
@@ -111,7 +111,14 @@ impl<const N: usize> RawFileHandler<N> {
             pack_facility!(mut EventsStreamFacility, stream),
         );
 
+        let roi = RawReaderROI::default();
+        self.register_facility(
+            FacilityType::ROIFacility,
+            pack_facility!(mut ROIFacility, roi),
+        );
+
         let decoder = RREventStreamDecoder::new(&header, true);
+
         self.register_facility(
             FacilityType::EventsStreamDecoderFacility,
             pack_facility!(mut EventsStreamDecoderFacility, decoder.clone()),

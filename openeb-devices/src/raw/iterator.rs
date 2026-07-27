@@ -1,3 +1,13 @@
+//! Batch-oriented iterator helpers for decoded CD events.
+//!
+//! `EventWindowIterator` sits on top of `RawFileReader` and lets callers consume
+//! decoded events either as fixed-size batches or as time windows. Two modes are
+//! available:
+//!
+//! - `IterSync` actively loads more raw data when the decoded queue runs dry.
+//! - `IterAsync` assumes another thread is feeding the decoder and only drains
+//!   the receiver.
+
 use std::{
     marker::PhantomData,
     sync::{Arc, RwLock},
@@ -17,6 +27,7 @@ pub struct IterSync;
 pub struct IterAsync;
 pub struct IterUnconfigured;
 
+/// Consumes decoded CD events in batch or time-window form.
 pub struct EventWindowIterator<const BUFFER_SIZE: usize, State = IterUnconfigured> {
     stream_handle: Arc<RwLock<dyn EventsStreamFacility + Send + 'static>>,
     decoder_handle: Arc<RwLock<dyn EventsStreamDecoderFacility + Send + 'static>>,
@@ -30,6 +41,9 @@ pub struct EventWindowIterator<const BUFFER_SIZE: usize, State = IterUnconfigure
 }
 
 impl<const BUFFER_SIZE: usize> EventWindowIterator<BUFFER_SIZE, IterUnconfigured> {
+    /// Creates an iterator in the unconfigured state.
+    ///
+    /// Call `into_sync` or `into_async` before using batch/window methods.
     pub fn new(
         receiver: Receiver<Arc<PooledBuffer<EventCD>>>,
         shape: (u32, u32),
@@ -46,6 +60,8 @@ impl<const BUFFER_SIZE: usize> EventWindowIterator<BUFFER_SIZE, IterUnconfigured
             _state: PhantomData,
         }
     }
+
+    /// Converts the iterator into synchronous mode.
     pub fn into_sync(self) -> EventWindowIterator<BUFFER_SIZE, IterSync> {
         EventWindowIterator {
             stream_handle: self.stream_handle,
@@ -58,6 +74,7 @@ impl<const BUFFER_SIZE: usize> EventWindowIterator<BUFFER_SIZE, IterUnconfigured
         }
     }
 
+    /// Converts the iterator into asynchronous mode.
     pub fn into_async(self) -> EventWindowIterator<BUFFER_SIZE, IterAsync> {
         EventWindowIterator {
             stream_handle: self.stream_handle,
@@ -72,6 +89,7 @@ impl<const BUFFER_SIZE: usize> EventWindowIterator<BUFFER_SIZE, IterUnconfigured
 }
 
 pub trait BufferReplenisher {
+    /// Ensures there are decoded events available in the internal buffer.
     fn replenish_buffer(&mut self) -> Result<(), DeviceFileError>;
 }
 
@@ -99,11 +117,12 @@ impl<const BUFFER_SIZE: usize> BufferReplenisher for EventWindowIterator<BUFFER_
 
 // Generic implementation block for ALL states
 impl<const BUFFER_SIZE: usize, State> EventWindowIterator<BUFFER_SIZE, State> {
+    /// Returns the sensor shape associated with the underlying reader.
     pub fn shape(&self) -> (u32, u32) {
         self.shape
     }
 
-    /// Internal logic for reading channel data into internal_buffer
+    /// Internal logic for reading channel data into `internal_buffer`.
     fn drain_channel_once(&mut self) {
         if let Ok(pooled_buffer) = self.receiver.recv() {
             self.internal_buffer
@@ -126,6 +145,10 @@ impl<const BUFFER_SIZE: usize, State> EventWindowIterator<BUFFER_SIZE, State> {
         }
     }
 
+    /// Returns the next batch of decoded CD events.
+    ///
+    /// The batch is capped at the iterator buffer size. If the stream ends after
+    /// some events were already collected, those events are still returned.
     pub fn next_batch(&mut self) -> Result<Vec<EventCD>, DeviceFileError>
     where
         Self: BufferReplenisher,
@@ -156,6 +179,10 @@ impl<const BUFFER_SIZE: usize, State> EventWindowIterator<BUFFER_SIZE, State> {
         Ok(batch)
     }
 
+    /// Returns the next window of CD events that fall within `dt` from the
+    /// current timestamp baseline.
+    ///
+    /// The iterator advances its internal time baseline by `dt` after each call.
     pub fn next_delta(&mut self, dt: u64) -> Result<Vec<EventCD>, DeviceFileError>
     where
         Self: BufferReplenisher,
@@ -221,13 +248,13 @@ impl<const BUFFER_SIZE: usize> EventWindowIterator<BUFFER_SIZE, IterSync> {
             .stream_handle
             .as_ref()
             .try_write()
-            .map_err(|_| DeviceFileError::WriteLockError)?;
+            .map_err(|_| DeviceFileError::LockError)?;
 
         let mut decoder_facility = self
             .decoder_handle
             .as_ref()
             .try_write()
-            .map_err(|_| DeviceFileError::WriteLockError)?;
+            .map_err(|_| DeviceFileError::LockError)?;
 
         let stream = crate::facility_downcast_mut!(stream_facility, RREventStream<BUFFER_SIZE>)?;
         let (buffer, _) = stream.poll_buffer()?;

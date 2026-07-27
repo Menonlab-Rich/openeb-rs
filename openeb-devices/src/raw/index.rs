@@ -1,3 +1,9 @@
+//! Timestamp index construction for raw files.
+//!
+//! The index is a coarse map from byte offsets to decoder timing state. It lets
+//! the reader seek near a target timestamp without decoding the entire file from
+//! the beginning.
+
 use crate::raw::decoder::RREventStreamDecoder;
 use crate::raw::stream::RREventStream;
 use crate::types::{DeviceFileError, FileIndex, IndexMarker};
@@ -5,6 +11,11 @@ use openeb_core::hal::decoders::evt3::Evt3Decoder;
 use openeb_core::hal::facilities::EventsStreamDecoderFacility;
 use std::io::{Read, Seek, SeekFrom};
 
+/// Builds a coarse timestamp index for a raw file.
+///
+/// The index is sampled every `chunk_size_bytes`, which makes seeking faster but
+/// not exact. The decoder state stored in each marker is used to resume decoding
+/// after a seek.
 pub(crate) fn build_index(
     path: &str,
     header_end_pos: u64,
@@ -72,6 +83,7 @@ pub(crate) fn build_index(
     })
 }
 
+/// Seeks the stream and decoder to the closest indexed position at or before `target_timestamp`.
 pub(crate) fn seek_to_timestamp<const N: usize>(
     index: &FileIndex,
     target_timestamp: usize,

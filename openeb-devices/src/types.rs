@@ -1,3 +1,8 @@
+//! Shared types used by the raw file reader and iterator layers.
+//!
+//! These types cover errors, file format handling, raw buffer storage, and
+//! indexing support for timestamp-based seeking.
+
 use crossbeam::channel::TryRecvError;
 use macros::derive_value;
 pub use openeb_core::hal::types::{EventCD, EventExtTrigger};
@@ -10,6 +15,7 @@ use thiserror::Error;
 
 // --- Supporting Types ---
 
+/// Errors that can occur while opening or reading a raw event file.
 #[derive(Error, Debug)]
 pub enum DeviceFileError {
     #[error("IO Error: {0}")]
@@ -26,10 +32,8 @@ pub enum DeviceFileError {
     EOF(),
     #[error("Unsupported facility: {0}")]
     UnsupportedFacility(String),
-    #[error(
-        "Failed to acquire write lock. If you get this error, report a pull request because we failed internally."
-    )]
-    WriteLockError,
+    #[error("Lock was poisoned")]
+    LockError,
     #[error("Facility Error: {0}")]
     FacilityTypeMismatch(#[from] facilities::FacilityTypeMismatch),
     #[error("Unregistred Facility: {0}")]
@@ -42,9 +46,16 @@ pub enum DeviceFileError {
     NotInitialized,
 }
 
+/// Placeholder error type for iterator-specific failures.
+///
+/// TODO: define concrete iterator failure modes or remove this type if it is no
+/// longer needed by the public API.
 #[derive(Error, Debug)]
 pub enum IteratorError {}
 
+/// File format identifier parsed from the raw header.
+///
+/// The default is `EVT3` because that is the currently supported decoder path.
 #[derive_value]
 pub enum FileFormat {
     EVT2,
@@ -71,11 +82,17 @@ impl Display for FileFormat {
     }
 }
 
+/// Decoder selection used by higher-level code.
+///
+/// TODO: this currently only models the EVT3 decoder path. Either expand this
+/// enum or replace it with a more direct abstraction if additional formats are
+/// added.
 pub enum FormatDecoder {
     Evt3(Evt3Decoder),
     Unknown,
 }
 
+/// Fixed-size byte buffer used to read raw stream chunks.
 #[derive(Debug, Clone, Copy)]
 pub struct RawEventBuffer<const N: usize> {
     _data: [u8; N],
@@ -108,10 +125,12 @@ impl<const N: usize> std::ops::DerefMut for RawEventBuffer<N> {
 }
 
 impl<const N: usize> RawEventBuffer<N> {
+    /// Creates a zero-initialized buffer.
     pub fn new() -> Self {
         RawEventBuffer { _data: [0u8; N] }
     }
 
+    /// Resizes the buffer, preserving as much data as will fit.
     pub fn resize<const M: usize>(self) -> RawEventBuffer<M> {
         let mut new_buffer = RawEventBuffer::<M>::new();
         let copy_len = std::cmp::min(N, M);
@@ -120,6 +139,7 @@ impl<const N: usize> RawEventBuffer<N> {
     }
 }
 
+/// Marker describing a point in the file index.
 #[derive(Clone, Debug)]
 pub struct IndexMarker {
     pub byte_offset: u64,
@@ -127,6 +147,11 @@ pub struct IndexMarker {
     pub state: DecoderTimingState,
 }
 
+/// Timestamp index for raw files.
+///
+/// The index stores sampled byte offsets and decoder timing state so the reader
+/// can jump near a requested timestamp and restore decoder state before
+/// continuing.
 #[derive(Clone, Debug, Default)]
 pub struct FileIndex {
     pub t_min: usize,
@@ -135,7 +160,7 @@ pub struct FileIndex {
 }
 
 impl FileIndex {
-    /// Performs a binary search to find the closest index marker occurring *before or at* the target timestamp.
+    /// Returns the closest marker occurring before or at `target_ts`.
     pub fn find_closest_marker(&self, target_ts: usize) -> Option<&IndexMarker> {
         if self.markers.is_empty() {
             return None;

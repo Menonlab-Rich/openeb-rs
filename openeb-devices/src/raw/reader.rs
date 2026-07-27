@@ -1,3 +1,14 @@
+//! High-level API for reading raw event files.
+//!
+//! `RawFileReader` is the main public entry point in this crate. It opens a
+//! file, wires up the stream and decoder facilities, and provides convenience
+//! methods for:
+//!
+//! - subscribing to decoded CD or external-trigger batches
+//! - loading decoded batches synchronously
+//! - seeking by timestamp when an index is available
+//! - exposing the parsed file time range
+
 use crate::EventWindowIterator;
 use crate::raw::decoder::RREventStreamDecoder;
 use crate::raw::device::RawFileHandler;
@@ -9,7 +20,7 @@ use num_traits::ToPrimitive;
 use openeb_core::hal::device::device::Device;
 use openeb_core::hal::facilities::{
     EventDecoderFacilityHandle, EventsStreamDecoderFacilityHandle, EventsStreamFacility,
-    EventsStreamFacilityHandle, FacilityError, FacilityType,
+    EventsStreamFacilityHandle, FacilityError, FacilityType, ROIFacility, ROIFacilityHandle,
 };
 use openeb_core::hal::types::{EventCD, EventExtTrigger};
 use std::sync::Arc;
@@ -25,12 +36,14 @@ pub struct RawFileReader<const BUFFER_SIZE: usize> {
 }
 
 impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
+    /// Returns `true` when the reader has an active stream handle.
     pub fn ready(&self) -> bool {
         self.stream_handle.is_some()
     }
 }
 
 impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
+    /// Creates an empty reader that has not opened a file yet.
     pub fn new() -> Self {
         let device = RawFileHandler::<BUFFER_SIZE>::new();
         Self {
@@ -42,6 +55,11 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
             initialized: false,
         }
     }
+
+    /// Opens a raw file and builds the internal handles.
+    ///
+    /// If `do_index` is `true`, a timestamp index is also built so `seek` and
+    /// `seek_to_next_ext` can operate efficiently.
     pub fn try_from_file(file_path: &str, do_index: bool) -> Result<Self, DeviceFileError> {
         let device = RawFileHandler::<BUFFER_SIZE>::new_from_path(file_path)?;
 
@@ -92,6 +110,9 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
         })
     }
 
+    /// Replaces the current file contents with a new file.
+    ///
+    /// This updates the device, facilities, and optional index in place.
     pub fn try_open(&mut self, file_path: &str, do_index: bool) -> Result<(), DeviceFileError> {
         self._device.try_open(file_path)?;
         let device = &self._device;
@@ -138,6 +159,7 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
         Ok(())
     }
 
+    /// Returns the minimum timestamp recorded in the optional index.
     pub fn t_min(&self) -> Option<usize> {
         if let Some(index) = &self.index {
             return Some(index.t_min);
@@ -146,6 +168,7 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
         None
     }
 
+    /// Returns the maximum timestamp recorded in the optional index.
     pub fn t_max(&self) -> Option<usize> {
         if let Some(index) = &self.index {
             return Some(index.t_max);
@@ -154,6 +177,10 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
         None
     }
 
+    /// Seeks to the timestamp nearest the requested position.
+    ///
+    /// This requires an index. The stream and decoder state are repositioned so
+    /// the next decode call resumes from the chosen marker.
     pub fn seek(&mut self, ts: u32) -> Result<(), DeviceFileError> {
         if !self.initialized {
             return Err(DeviceFileError::NotInitialized);
@@ -169,11 +196,11 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
         let mut stream_facility = stream_handle
             .as_ref()
             .try_write()
-            .map_err(|_| DeviceFileError::WriteLockError)?;
+            .map_err(|_| DeviceFileError::LockError)?;
         let mut decoder_facility = decoder_handle
             .as_ref()
             .try_write()
-            .map_err(|_| DeviceFileError::WriteLockError)?;
+            .map_err(|_| DeviceFileError::LockError)?;
 
         let stream = crate::facility_downcast_mut!(stream_facility, RREventStream<BUFFER_SIZE>)?;
         let decoder = crate::facility_downcast_mut!(decoder_facility, RREventStreamDecoder)?;
@@ -186,6 +213,25 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
         )
     }
 
+    /// Returns the ROIFacilityHandle allowing the reader to retain
+    /// state about the ROI. For the reader type this is merely a stateful
+    /// representation. Filtering will take place down stream at consumption.
+    pub fn roi(&self) -> Result<ROIFacilityHandle, DeviceFileError> {
+        let roi_handle: ROIFacilityHandle = self
+            ._device
+            .get_facility(FacilityType::ROIFacility)
+            .ok_or(DeviceFileError::UnsupportedFacility(
+                "ROIFacility".to_string(),
+            ))?
+            .try_into()?;
+
+        Ok(roi_handle)
+    }
+
+    /// Seeks to the timestamp of the next external trigger event.
+    ///
+    /// This consumes decoded batches until an external trigger appears, then
+    /// uses that trigger timestamp as the seek target.
     pub fn seek_to_next_ext(&mut self) -> Result<(), DeviceFileError> {
         let recv = self.ext_receiver()?;
         loop {
@@ -197,18 +243,19 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
         }
     }
 
+    /// Returns a receiver for decoded CD event batches and starts the stream.
     pub fn cd_receiver(&mut self) -> Result<Receiver<Arc<PooledBuffer<EventCD>>>, DeviceFileError> {
         let stream_handle = self.get_stream_handle()?;
         let event_decoder_handle = self.get_event_decoder_handle()?;
         let mut stream_facility = stream_handle
             .as_ref()
             .try_write()
-            .map_err(|_| DeviceFileError::WriteLockError)?;
+            .map_err(|_| DeviceFileError::LockError)?;
 
         let mut event_decoder_facility = event_decoder_handle
             .as_ref()
             .try_write()
-            .map_err(|_| DeviceFileError::WriteLockError)?;
+            .map_err(|_| DeviceFileError::LockError)?;
 
         let stream = crate::facility_downcast_mut!(stream_facility, RREventStream<BUFFER_SIZE>)?;
 
@@ -217,6 +264,7 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
         Ok(cd_receiver)
     }
 
+    /// Returns a receiver for decoded external-trigger event batches and starts the stream.
     pub fn ext_receiver(
         &mut self,
     ) -> Result<Receiver<Arc<PooledBuffer<EventExtTrigger>>>, DeviceFileError> {
@@ -225,12 +273,12 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
         let mut stream_facility = stream_handle
             .as_ref()
             .try_write()
-            .map_err(|_| DeviceFileError::WriteLockError)?;
+            .map_err(|_| DeviceFileError::LockError)?;
 
         let mut ext_evt_decoder_facility = event_decoder_handle
             .as_ref()
             .try_write()
-            .map_err(|_| DeviceFileError::WriteLockError)?;
+            .map_err(|_| DeviceFileError::LockError)?;
 
         let stream = crate::facility_downcast_mut!(stream_facility, RREventStream<BUFFER_SIZE>)?;
 
@@ -240,18 +288,19 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
         Ok(ext_receiver)
     }
 
+    /// Loads one raw buffer from the stream and decodes it immediately.
     pub fn load_batch(&mut self) -> Result<(), DeviceFileError> {
         let stream_handle = self.get_stream_handle()?;
         let decoder_handle = self.get_decoder_handle()?;
         let mut stream_facility = stream_handle
             .as_ref()
             .try_write()
-            .map_err(|_| DeviceFileError::WriteLockError)?;
+            .map_err(|_| DeviceFileError::LockError)?;
 
         let mut decoder_facility = decoder_handle
             .as_ref()
             .try_write()
-            .map_err(|_| DeviceFileError::WriteLockError)?;
+            .map_err(|_| DeviceFileError::LockError)?;
 
         let stream = crate::facility_downcast_mut!(stream_facility, RREventStream<BUFFER_SIZE>)?;
         let (buffer, _) = stream.poll_buffer()?;
@@ -272,6 +321,10 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
             stream_handle,
             decoder_handle,
         ))
+    }
+
+    pub fn shape(&self) -> (u32, u32) {
+        self._device.shape()
     }
 
     fn assert_initialized(&self) -> Result<(), DeviceFileError> {
