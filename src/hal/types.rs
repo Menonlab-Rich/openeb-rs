@@ -1,7 +1,6 @@
-use macros::{derive_value, new};
+use crate::new;
 
-#[derive_value]
-#[derive(new)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, new)]
 /// A decoded change-detection event.
 pub struct EventCD {
     /// Horizontal pixel coordinate.
@@ -14,8 +13,7 @@ pub struct EventCD {
     pub t: usize,
 }
 
-#[derive_value]
-#[derive(new)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, new)]
 /// A decoded external-trigger event.
 pub struct EventExtTrigger {
     /// Trigger polarity.

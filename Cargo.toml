@@ -1,9 +1,27 @@
-[workspace]
-members = [
-    "macros",
-    "core",
-    "openeb-devices",
-    "local-proc-macros",
-    "utilities",
-]
-resolver = "3"
+[package]
+name = "openeb-rs"
+version = "0.1.0"
+edition = "2024"
+authors = ["Rich Baird <rich@rbaird.me>"]
+description = "A rust implementation of the openeb repository by Prophesee.ai"
+license = "MIT" # Choose an appropriate open-source license
+repository = "https://github.com/richbai90/openeb-rs"
+
+[features]
+default = ["all"]
+all = ["devices"]
+devices = ["dep:num-traits", "dep:regex"]
+
+[dependencies]
+anyhow = "1.0.100"
+thiserror = "2.0.18"
+log = "0.4.29"
+crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
+derive-new = "0.7.0"
+paste = "1.0.15"
+num-traits = { version = "0.2.19", optional = true }
+regex = { version = "1.12.3", optional = true }
+
+[lib]
+name = "openeb"
+path = "src/lib.rs"

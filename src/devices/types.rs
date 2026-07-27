@@ -4,7 +4,7 @@
 //! indexing support for timestamp-based seeking.
 
 use crossbeam::channel::TryRecvError;
-use macros::derive_value;
+
 pub use openeb_core::hal::types::{EventCD, EventExtTrigger};
 use openeb_core::hal::{
     decoders::evt3::{DecoderTimingState, Evt3Decoder},
@@ -69,7 +69,7 @@ pub enum IteratorError {}
 /// File format identifier parsed from the raw header.
 ///
 /// The default is `EVT3` because that is the currently supported decoder path.
-#[derive_value]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileFormat {
     /// EVT 2.0 event stream.
     EVT2,

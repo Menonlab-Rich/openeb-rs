@@ -3,7 +3,6 @@ use crate::raw::decoder::RREventStreamDecoder;
 use crate::raw::facilities::{RawReaderGeometry, RawReaderHWIdentification, RawReaderROI};
 use crate::raw::stream::RREventStream;
 use crate::types::DeviceFileError;
-use macros::pack_facility;
 use openeb_core::hal::device::device::Device;
 use openeb_core::hal::facilities::{FacilityHandle, FacilityType};
 use std::collections::HashMap;

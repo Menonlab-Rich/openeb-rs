@@ -15,7 +15,6 @@ use crate::hal::facilities::{
 };
 use crate::hal::types::{EventCD, EventExtTrigger};
 use log::warn;
-use macros::derive_value;
 use macros::new;
 
 /// Decoder for the EVT3 event data format.
@@ -126,8 +125,7 @@ impl Evt3Decoder {
 }
 
 /// Represents the different 16-bit EVT3 word classes.
-#[derive_value]
-#[derive(new)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, new)]
 enum EVTWord {
     /// X-coordinate address event.
     AddrX,

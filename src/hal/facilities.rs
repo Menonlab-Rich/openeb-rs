@@ -26,7 +26,6 @@ use crate::hal::types::{Cb, CbRo, PixelMask, Region};
 use crate::hal::types::{EventCD, EventExtTrigger};
 use crossbeam::channel::Receiver;
 pub use macros::pack_facility;
-use macros::property;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use thiserror::Error;
