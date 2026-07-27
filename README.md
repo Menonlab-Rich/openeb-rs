@@ -93,7 +93,7 @@ The raw-file path currently works like this:
 
 ## Current status and limitations
 
-This codebase is functional in structure but not complete in implementation.
+The implementation is incomplete.
 
 Notable gaps:
 
@@ -116,4 +116,3 @@ cargo check
 - The workspace is organized around the facility abstraction in `openeb-core`. When adding new device behavior, prefer modeling it as a facility rather than adding ad hoc methods.
 - Shared event batching should continue to use `PooledBuffer<T>` so vector reuse stays centralized.
 - If you add a new raw file format, update the format selection in `openeb-devices/src/raw/decoder.rs` and make sure the header parser can detect it.
-

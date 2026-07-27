@@ -93,7 +93,7 @@ pub trait BufferReplenisher {
     fn replenish_buffer(&mut self) -> Result<(), DeviceFileError>;
 }
 
-// ASYNC MODE: Just waits for an external thread to feed the channel
+// ASYNC MODE: Waits for an external thread to feed the channel.
 impl<const BUFFER_SIZE: usize> BufferReplenisher for EventWindowIterator<BUFFER_SIZE, IterAsync> {
     fn replenish_buffer(&mut self) -> Result<(), DeviceFileError> {
         if self.internal_buffer.is_empty() {

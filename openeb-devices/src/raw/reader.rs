@@ -1,7 +1,7 @@
 //! High-level API for reading raw event files.
 //!
 //! `RawFileReader` is the main public entry point in this crate. It opens a
-//! file, wires up the stream and decoder facilities, and provides convenience
+//! file, wires up the stream and decoder facilities, and provides helper
 //! methods for:
 //!
 //! - subscribing to decoded CD or external-trigger batches
@@ -214,7 +214,7 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
     }
 
     /// Returns the ROIFacilityHandle allowing the reader to retain
-    /// state about the ROI. For the reader type this is merely a stateful
+    /// state about the ROI. For the reader type this is a stateful
     /// representation. Filtering will take place down stream at consumption.
     pub fn roi(&self) -> Result<ROIFacilityHandle, DeviceFileError> {
         let roi_handle: ROIFacilityHandle = self

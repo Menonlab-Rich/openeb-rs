@@ -1,3 +1,9 @@
+//! EVT2 raw decoder.
+//!
+//! This decoder is present to support the EVT2 file format, but it is more
+//! limited than the EVT3 decoder and may still need protocol-level completion in
+//! areas that are not exercised by the current reader path.
+
 use crossbeam::channel::{Receiver, Sender, bounded};
 use std::sync::Arc;
 use utilities::buffer::PooledBuffer;
@@ -9,6 +15,7 @@ use crate::hal::facilities::{
 };
 use crate::hal::types::{EventCD, EventExtTrigger};
 
+/// Decoder for EVT2 raw event streams.
 pub struct Evt2Decoder {
     pub evt_dispatcher: Arc<EventDispatcher>,
     pub err_dispatcher: Arc<ErrorDispatcher>,
@@ -44,6 +51,7 @@ impl Evt2Decoder {
     const TIME_HIGH_MASK: u32 = 0xFFFFFFF; // 28 bits
     const TRIGGER_ID_MASK: u32 = 0x1F; // 5 bits
 
+    /// Creates a new EVT2 decoder for the supplied geometry.
     pub fn new(max_x: u16, max_y: u16, do_time_shift: bool) -> Self {
         let (cd_pool_tx, cd_pool_rx) = bounded(32);
         let (ext_pool_tx, ext_pool_rx) = bounded(32);
@@ -68,6 +76,7 @@ impl Evt2Decoder {
     }
 
     #[inline(always)]
+    /// Reconstructs the current EVT2 timestamp from the stored high bits.
     fn current_timestamp(&mut self, time_low: u32) -> usize {
         // Concatenate the 28-bit time_high with the 6-bit time_low
         let abs_ts = ((self.time_high as usize) << 6) | (time_low as usize);
@@ -82,6 +91,10 @@ impl Evt2Decoder {
         self.last_t
     }
 
+    /// Processes one EVT2 word and appends any decoded events to the buffers.
+    ///
+    /// TODO: verify the full EVT2 protocol coverage here. The current
+    /// implementation handles the basic CD, time, and trigger word classes.
     fn process_word(&mut self, word: u32) {
         let evt_type = word >> 28;
 
@@ -125,6 +138,7 @@ impl Evt2Decoder {
         }
     }
 
+    /// Dispatches buffered CD and external-trigger events.
     fn dispatch(&mut self) {
         if !self.cd_buffer.is_empty() {
             let new_buffer = self
@@ -161,6 +175,7 @@ impl Evt2Decoder {
 }
 
 impl EventsStreamDecoderFacility for Evt2Decoder {
+    /// Decodes a raw EVT2 byte buffer into typed events.
     fn decode(&mut self, raw_data: &[u8]) -> FacilityResult<()> {
         let mut data = raw_data;
 
@@ -200,50 +215,61 @@ impl EventsStreamDecoderFacility for Evt2Decoder {
         Ok(())
     }
 
+    /// Returns the last timestamp emitted by the decoder.
     fn get_last_timestamp(&self) -> usize {
         self.last_t
     }
 
+    /// Returns the current timestamp shift, if one has been established.
     fn get_timestamp_shift(&self) -> Option<usize> {
         self.first_ts
     }
 
+    /// Returns whether timestamps are shifted relative to the first event.
     fn is_time_shifting_enabled(&self) -> bool {
         self.do_time_shift
     }
 
+    /// Updates the last decoded timestamp.
     fn reset_last_timestamp(&mut self, timestamp: usize) {
         self.last_t = timestamp;
     }
 
+    /// Updates the timestamp shift baseline.
     fn reset_timestamp_shift(&mut self, shift: usize) {
         self.first_ts = Some(shift);
     }
 
+    /// EVT2 streams are not currently treated as indexable.
     fn is_decoded_event_stream_indexable(&self) -> bool {
         false
     }
 }
 
 impl BaseDecoderFacility for Evt2Decoder {
+    /// Subscribes to decoder protocol violation errors.
     fn subscribe_to_protocol_violation(&mut self) -> Receiver<SharedError> {
         self.err_dispatcher.subscribe::<SharedError>()
     }
 
+    /// Returns the EVT2 raw word size.
     fn get_raw_event_size_bytes(&self) -> FacilityResult<u8> {
         Ok(4) // EVT2 is strictly 32-bit / 4-byte words
     }
 }
 
 impl EventDecoderFacility for Evt2Decoder {
+    /// Subscribes to decoded CD event batches.
     fn subscribe_to_cd_events(&mut self) -> Receiver<Arc<PooledBuffer<EventCD>>> {
         self.evt_dispatcher.subscribe_cd(2048)
     }
 
+    /// Subscribes to decoded external-trigger event batches.
     fn subscribe_to_ext_events(&mut self) -> Receiver<Arc<PooledBuffer<EventExtTrigger>>> {
         self.evt_dispatcher.subscribe_ext(2048)
     }
 
+    /// Adds a decoded CD event buffer to the dispatcher.
     fn add_event_buffer(&mut self, range: Arc<PooledBuffer<EventCD>>) {
         self.evt_dispatcher.send_cd(range);
     }

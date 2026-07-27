@@ -1,3 +1,10 @@
+//! Dispatchers used by decoders to publish decoded batches and errors.
+//!
+//! These are small fan-out utilities built on `crossbeam` channels. They are
+//! lossy under backpressure: if a subscriber stops draining its
+//! queue, the dispatcher drops that batch for that subscriber rather than
+//! blocking the decoder.
+
 use std::{
     any::TypeId,
     collections::HashMap,
@@ -13,6 +20,7 @@ use crossbeam::channel::{Receiver, Sender, TrySendError, bounded};
 use log::{debug, warn};
 use utilities::buffer::PooledBuffer;
 
+/// Routes typed errors to subscribers that asked for that exact error type.
 pub struct ErrorDispatcher {
     subscribers: RwLock<HashMap<TypeId, Vec<Sender<SharedError>>>>,
     channel_capacity: usize,
@@ -25,7 +33,7 @@ impl Default for ErrorDispatcher {
 }
 
 impl ErrorDispatcher {
-    /// Initializes the dispatcher with a set capacity for all subscriber channels.
+    /// Creates a dispatcher with a fixed channel capacity for all subscribers.
     pub fn new(channel_capacity: usize) -> Self {
         Self {
             subscribers: RwLock::new(HashMap::new()),
@@ -33,6 +41,10 @@ impl ErrorDispatcher {
         }
     }
 
+    /// Subscribes to errors of type `T`.
+    ///
+    /// The returned receiver yields `SharedError` values that can be downcast
+    /// by the consumer if needed.
     pub fn subscribe<T: Error + 'static>(&self) -> Receiver<SharedError> {
         let (tx, rx) = bounded(self.channel_capacity);
         let type_id = TypeId::of::<T>();
@@ -43,12 +55,16 @@ impl ErrorDispatcher {
         rx
     }
 
+    /// Removes all subscribers for the given error type.
     pub fn unsubscribe<T: Error + 'static>(&self) -> bool {
         let type_id = TypeId::of::<T>();
         let mut subs = self.subscribers.write().unwrap();
         subs.remove(&type_id).is_some()
     }
 
+    /// Dispatches one error value to all current subscribers of the same type.
+    ///
+    /// Slow subscribers drop the message but remain registered.
     pub fn dispatch<T: Error + Send + Sync + 'static>(&self, error: T) {
         let type_id = TypeId::of::<T>();
         let shared_error: SharedError = Arc::new(error);
@@ -62,7 +78,7 @@ impl ErrorDispatcher {
                     // The receiver is active but the queue is full.
                     // Keep the channel registered, but drop this specific message for this consumer.
                     Err(TrySendError::Full(_)) => {
-                        // Optional: Log the dropped message metric here
+                        // A dropped-message metric can be recorded here.
                         true
                     }
                     // The receiver has been dropped. Remove the sender from the vector.
@@ -73,12 +89,11 @@ impl ErrorDispatcher {
     }
 }
 
-/// A dispatcher that routes events to multiple subscribers.
-/// It supports routing for both CD (Change Detection) events and External Trigger events.
+/// Routes decoded event batches to subscribers.
 pub struct EventDispatcher {
-    /// Subscribers for CD (Change Detection) events.
+    /// Subscribers for CD events.
     cd_subscribers: RwLock<Vec<Sender<Arc<PooledBuffer<EventCD>>>>>,
-    /// Subscribers for external trigger events.
+    /// Subscribers for external-trigger events.
     ext_subscribers: RwLock<Vec<Sender<Arc<PooledBuffer<EventExtTrigger>>>>>,
 }
 
@@ -89,7 +104,7 @@ impl Default for EventDispatcher {
 }
 
 impl EventDispatcher {
-    /// Creates a new `EventDispatcher` with empty subscriber lists.
+    /// Creates an empty event dispatcher.
     pub fn new() -> Self {
         EventDispatcher {
             cd_subscribers: RwLock::new(Vec::new()),
@@ -97,36 +112,27 @@ impl EventDispatcher {
         }
     }
 
-    /// Subscribes to CD events.
+    /// Subscribes to decoded CD batches.
     ///
-    /// # Arguments
-    /// * `capacity` - The maximum number of unread event batches the channel can hold.
-    ///
-    /// # Returns
-    /// A `Receiver` channel to consume `EventCD` batches.
+    /// `capacity` controls how many batches can queue before the dispatcher
+    /// starts dropping batches for that subscriber.
     pub fn subscribe_cd(&self, capacity: usize) -> Receiver<Arc<PooledBuffer<EventCD>>> {
         let (tx, rx) = bounded(capacity);
         self.cd_subscribers.write().unwrap().push(tx);
         rx
     }
 
-    /// Subscribes to External Trigger events.
-    ///
-    /// # Arguments
-    /// * `capacity` - The maximum number of unread event batches the channel can hold.
-    ///
-    /// # Returns
-    /// A `Receiver` channel to consume `EventExtTrigger` batches.
+    /// Subscribes to decoded external-trigger batches.
     pub fn subscribe_ext(&self, capacity: usize) -> Receiver<Arc<PooledBuffer<EventExtTrigger>>> {
         let (tx, rx) = bounded(capacity);
         self.ext_subscribers.write().unwrap().push(tx);
         rx
     }
 
-    /// Broadcasts a batch of CD events to all registered subscribers.
+    /// Broadcasts a CD batch to all subscribers.
     ///
-    /// Handles subscriber backpressure by dropping the event batch for any subscriber
-    /// whose queue is full, and automatically cleans up disconnected subscribers.
+    /// Full queues drop the batch for that subscriber. Disconnected subscribers
+    /// are removed.
     pub fn send_cd(&self, events: Arc<PooledBuffer<EventCD>>) {
         let mut subs = self.cd_subscribers.write().unwrap();
 
@@ -151,10 +157,7 @@ impl EventDispatcher {
         });
     }
 
-    /// Broadcasts a batch of External Trigger events to all registered subscribers.
-    ///
-    /// Handles subscriber backpressure by dropping the event batch for any subscriber
-    /// whose queue is full, and automatically cleans up disconnected subscribers.
+    /// Broadcasts an external-trigger batch to all subscribers.
     pub fn send_ext(&self, events: Arc<PooledBuffer<EventExtTrigger>>) {
         let mut subs = self.ext_subscribers.write().unwrap();
 

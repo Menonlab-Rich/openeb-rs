@@ -1,3 +1,9 @@
+//! Local procedural macros used by the workspace.
+//!
+//! `derive_value` is the only macro currently exported. It applies a common set
+//! of value-type derives to enums and structs so the surrounding code can remain
+//! concise while still producing ergonomic types.
+
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Item, parse_macro_input};

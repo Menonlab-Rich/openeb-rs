@@ -1,3 +1,9 @@
+//! EVT3 raw decoder.
+//!
+//! This decoder turns 16-bit EVT3 words into typed CD and external-trigger
+//! events. It also maintains timing state so callers can seek, index, and
+//! optionally time-shift the output stream relative to the first observed event.
+
 use crossbeam::channel::{Receiver, Sender, bounded};
 use std::sync::Arc;
 use utilities::buffer::PooledBuffer;
@@ -13,52 +19,53 @@ use macros::derive_value;
 use macros::new;
 
 /// Decoder for the EVT3 event data format.
-/// EVT3 is commonly used by event-based vision sensors to encode timestamps and pixel coordinates efficiently.
+///
+/// The decoder is stateful: it tracks spatial context, timestamp reconstruction,
+/// and buffer boundaries so it can decode a continuous raw stream safely.
 pub struct Evt3Decoder {
-    /// Thread-safe reference to the event dispatcher used to route decoded events.
+    /// Thread-safe dispatcher used to route decoded event batches.
     pub evt_dispatcher: Arc<EventDispatcher>,
-    /// Thread-safe reference to the error dispatcher used to route errors to specific handlers.
+    /// Thread-safe dispatcher used to route decode and protocol errors.
     pub err_dispatcher: Arc<ErrorDispatcher>,
-    /// The first fully decoded timestamp; used to enable time shifting if required.
+    /// First decoded absolute timestamp, used when time shifting is enabled.
     first_ts: Option<usize>,
-    /// Accumulated base time offset used to reconstruct timestamps from 24bit timer events.
+    /// Accumulated wrap-around offset used to reconstruct a monotonic timestamp.
     time_offset: usize,
-    /// The last 24-bit timestamp (t24) received, used to handle timer wrap-around.
+    /// Last observed 24-bit timestamp value.
     last_t24: usize,
-    /// The last reported timestamp, saved for the get_last_timestamp method.
+    /// Last reported timestamp value.
     last_t: usize,
-    /// Flag indicating whether timestamps should be shifted relative to the first event.
+    /// When true, timestamps are shifted so the first decoded event starts at 0.
     pub do_time_shift: bool,
-    /// Holds a partial byte when an event word is split across buffer boundaries.
+    /// Trailing byte from a split 16-bit word at a buffer boundary.
     split_byte: Option<u8>,
-    /// High 16 bits of the current event timestamp.
+    /// High portion of the current event timestamp.
     time_high: usize,
-    /// Low 16 bits of the current event timestamp.
+    /// Low portion of the current event timestamp.
     time_low: usize,
-    /// Y-coordinate of the current event.
+    /// Current Y coordinate in the EVT3 state machine.
     y: Option<u16>,
-    /// X-coordinate of the current event.
+    /// Base X coordinate for vector payloads.
     base_x: u16,
-    /// Polarity of the event (e.g., true for ON/increase, false for OFF/decrease).
+    /// Current event polarity.
     polarity: bool,
-    /// The previous decoded EVT3 word, used for state-dependent decoding.
+    /// Previous decoded EVT3 word type.
     prev_word: Option<EVTWord>,
-    /// Indicates the number of valid bits or a validity mask for the payload.
-    /// Accumulates payload data (e.g., bitmasks representing multiple events in a row).
+    /// Accumulates payload bits for "others" style multiword sequences.
     payload_accumulator: usize,
-    /// Subtype identifier for 'other' event types (e.g., external triggers, sensor markers).
+    /// Subtype marker for vendor-specific or otherwise unhandled `Others` words.
     others_subtype: u16,
-    /// Current bit shift index within the payload accumulator.
+    /// Current shift offset within `payload_accumulator`.
     payload_bit_shift: u8,
-    /// A buffer of decoded CD events for batching dispatches.
+    /// Batched CD events waiting to be dispatched.
     cd_buffer: Vec<EventCD>,
-    /// A buffer of ext_trigger_events for batching dispatches.
+    /// Batched external-trigger events waiting to be dispatched.
     ext_trigger_buffer: Vec<EventExtTrigger>,
-    /// The max address for an x coordinate
+    /// Maximum allowed X coordinate.
     pub max_x: u16,
-    /// The max address for a y coordinate
+    /// Maximum allowed Y coordinate.
     pub max_y: u16,
-    /// Previous time_high
+    /// Previous high timestamp value, preserved for timing validation.
     prev_time_high: usize,
 
     // Pool Channels
@@ -105,6 +112,7 @@ impl Default for Evt3Decoder {
 }
 
 impl Evt3Decoder {
+    /// Creates a decoder configured for the supplied sensor geometry.
     pub fn new(max_x: u16, max_y: u16, do_time_shift: bool) -> Self {
         let decoder: Evt3Decoder = Evt3Decoder {
             max_x,
@@ -117,7 +125,7 @@ impl Evt3Decoder {
     }
 }
 
-/// Represents the different types of event words in an event data stream.
+/// Represents the different 16-bit EVT3 word classes.
 #[derive_value]
 #[derive(new)]
 enum EVTWord {
@@ -145,21 +153,10 @@ enum EVTWord {
     Continued12,
 }
 
-/// Implements the `TryFrom` trait to safely parse an `EVTWord` from a 16-bit reference.
+/// Parses an EVT3 word class from the top four bits of a raw 16-bit word.
 impl TryFrom<&u16> for EVTWord {
     type Error = DecoderProtocolViolation;
 
-    /// Attempts to convert a 16-bit raw value into an `EVTWord`.
-    ///
-    /// The event type is determined by the 4 most significant bits (MSB) of the 16-bit word.
-    ///
-    /// # Arguments
-    ///
-    /// * `value` - A reference to a `u16` raw value.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error `String` if the 4 MSBs do not correspond to a known `EVTWord`.
     fn try_from(value: &u16) -> Result<Self, Self::Error> {
         // Extract the 4 most significant bits by shifting right by 12.
         let msb = (value >> 12) as u8;
@@ -183,15 +180,11 @@ impl TryFrom<&u16> for EVTWord {
 
 impl Evt3Decoder {
     const BATCH_SIZE: usize = 4096;
-    /// Calculates and returns the continuous timestamp.
+    /// Reconstructs a monotonic timestamp from the current decoder state.
     ///
-    /// Combines `time_high` and `time_low` into a 24-bit value. Handles hardware
-    /// counter rollovers by maintaining a continuous `time_offset`. Logs a warning
-    /// if a small backward time jump is detected, which indicates out-of-order
-    /// multiplexing.
-    ///
-    /// # Returns
-    /// * `usize` - The calculated continuous timestamp.
+    /// EVT3 timestamps are built from the current `time_high` and `time_low`
+    /// fields. The decoder tracks wrap-around and optionally shifts timestamps so
+    /// the first event starts at zero.
     #[inline(always)]
     pub fn current_timestamp(&mut self) -> usize {
         let t24 = (self.time_high << 12) | self.time_low;
@@ -204,7 +197,7 @@ impl Evt3Decoder {
             } else {
                 warn!("Out-of-order multiplexing");
             }
-            // If the drop is small, it's just out-of-order multiplexing.
+            // A small backward step can result from out-of-order multiplexing.
             // We do not increment the offset.
         }
 
@@ -222,23 +215,27 @@ impl Evt3Decoder {
         self.last_t
     }
 
+    /// Returns the current low timestamp field.
     pub fn _get_time_low(&self) -> usize {
         self.time_low
     }
 
+    /// Returns the current high timestamp field.
     pub fn _get_time_high(&self) -> usize {
         self.time_high
     }
 
+    /// Updates the current low timestamp field.
     pub fn _set_time_low(&mut self, value: usize) {
         self.time_low = value
     }
 
+    /// Updates the current high timestamp field.
     pub fn _set_time_high(&mut self, value: usize) {
         self.time_high = value
     }
 
-    /// Flushes any pending operations by dispatching them immediately.
+    /// Flushes any buffered events to their dispatchers.
     pub fn flush(&mut self) {
         self.dispatch();
     }
@@ -247,14 +244,11 @@ impl Evt3Decoder {
         self.prev_word = None;
     }
 
-    /// Processes a single 16-bit word from the event stream, decoding its type
-    /// and payload to update the internal state or generate events.
+    /// Processes one EVT3 word and updates decoder state.
     ///
-    /// # Arguments
-    /// * `word` - The 16-bit encoded data word to process.
-    ///
-    /// # Errors
-    /// Returns `DecoderProtocolViolation` if the word sequence or values violate the protocol.
+    /// The state machine updates timestamp and coordinate context, emits CD and
+    /// external-trigger events, and returns a protocol violation when the word
+    /// sequence is not valid.
     fn process_word(&mut self, word: u16) -> Result<(), DecoderProtocolViolation> {
         // Bitmasks for extracting payloads of various sizes
         const MASK_12: u16 = 0x0FFF;
@@ -449,8 +443,7 @@ impl Evt3Decoder {
         Ok(())
     }
 
-    /// Dispatches the currently buffered events (both CD and external triggers)
-    /// to their respective event dispatchers.
+    /// Dispatches all currently buffered events.
     fn dispatch(&mut self) {
         // Process CD (Change Detection) buffer if it contains any events
         if !self.cd_buffer.is_empty() {
@@ -498,21 +491,21 @@ impl Evt3Decoder {
 
 impl BaseDecoderFacility for Evt3Decoder {
     /// Subscribes to decoder protocol violation errors.
-    ///
-    /// Returns a `Receiver` that yields shared errors when a violation occurs.
     fn subscribe_to_protocol_violation(&mut self) -> Receiver<SharedError> {
         self.err_dispatcher.subscribe::<DecoderProtocolViolation>()
     }
 
-    /// Gets the size of a raw event in bytes.
-    ///
-    /// Always returns `Ok(2)` for EVT3 since the raw event size is fixed.
+    /// Returns the EVT3 raw word size.
     fn get_raw_event_size_bytes(&self) -> crate::hal::facilities::FacilityResult<u8> {
         Ok(2)
     }
 }
 
 impl EventsStreamDecoderFacility for Evt3Decoder {
+    /// Decodes a raw byte buffer into typed EVT3 events.
+    ///
+    /// Buffer boundaries may split 16-bit words, so the decoder preserves one
+    /// trailing byte between calls when needed.
     fn decode(&mut self, raw_data: &[u8]) -> crate::hal::facilities::FacilityResult<()> {
         let mut data = raw_data;
 
@@ -554,45 +547,56 @@ impl EventsStreamDecoderFacility for Evt3Decoder {
         Ok(())
     }
 
+    /// Returns the last timestamp emitted by the decoder.
     fn get_last_timestamp(&self) -> usize {
         self.last_t
     }
 
+    /// Returns the current time shift, if one has been established.
     fn get_timestamp_shift(&self) -> Option<usize> {
         self.first_ts
     }
 
+    /// Returns whether decoded timestamps are shifted relative to the first event.
     fn is_time_shifting_enabled(&self) -> bool {
         self.do_time_shift
     }
 
+    /// Updates the last decoded timestamp.
     fn reset_last_timestamp(&mut self, timestamp: usize) {
         self.last_t = timestamp;
     }
 
+    /// Updates the timestamp shift baseline.
     fn reset_timestamp_shift(&mut self, shift: usize) {
         self.first_ts = Some(shift);
     }
 
+    /// EVT3 streams can be indexed because time words and event words can be
+    /// replayed into a stable timing state.
     fn is_decoded_event_stream_indexable(&self) -> bool {
         true
     }
 }
 
 impl EventDecoderFacility for Evt3Decoder {
+    /// Subscribes to decoded CD event batches.
     fn subscribe_to_cd_events(&mut self) -> Receiver<Arc<PooledBuffer<EventCD>>> {
         self.evt_dispatcher.subscribe_cd(2048)
     }
 
+    /// Subscribes to decoded external-trigger batches.
     fn subscribe_to_ext_events(&mut self) -> Receiver<Arc<PooledBuffer<EventExtTrigger>>> {
         self.evt_dispatcher.subscribe_ext(2048)
     }
 
+    /// Adds a decoded CD event buffer to the dispatcher.
     fn add_event_buffer(&mut self, range: Arc<PooledBuffer<EventCD>>) {
         self.evt_dispatcher.send_cd(range);
     }
 }
 
+/// Snapshot of the EVT3 decoder timing state.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DecoderTimingState {
     pub time_high: usize,
@@ -603,7 +607,7 @@ pub struct DecoderTimingState {
 }
 
 impl Evt3Decoder {
-    /// Captures the current absolute clock state without any spatial properties.
+    /// Captures the current absolute clock state.
     pub fn get_timing_state(&self) -> DecoderTimingState {
         DecoderTimingState {
             time_high: self.time_high,
@@ -614,8 +618,10 @@ impl Evt3Decoder {
         }
     }
 
-    /// Restores a previously saved timing context and resets spatial tracking states
-    /// to avoid coordinate corruption across chunk boundaries.
+    /// Restores a previously saved timing context.
+    ///
+    /// Spatial state is cleared because timing snapshots are only valid for the
+    /// timestamp pipeline, not for partially decoded coordinate sequences.
     pub fn set_timing_state(&mut self, state: DecoderTimingState) {
         self.time_high = state.time_high;
         self.time_low = state.time_low;

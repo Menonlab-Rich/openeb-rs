@@ -1,3 +1,14 @@
+//! Shared declarative macros and re-exports used across the workspace.
+//!
+//! This crate keeps repeated boilerplate out of the
+//! HAL and device layers:
+//!
+//! - `new` re-exports `derive_new::new`
+//! - `derive_value` is the local attribute macro for lightweight value types
+//! - `property!` expands facility property signatures
+//! - `pack_facility!` wraps concrete facility implementations in the correct
+//!   `FacilityHandle` variant
+
 pub use derive_new::new;
 pub use local_proc_macros::derive_value;
 pub use paste;

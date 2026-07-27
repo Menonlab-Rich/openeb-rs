@@ -1,8 +1,8 @@
 //! File-backed implementations of core HAL facilities.
 //!
 //! These types adapt metadata found in a raw file header into the facility
-//! interfaces expected by `openeb-core`. They are intentionally minimal and only
-//! expose what can be derived directly from the file contents.
+//! interfaces expected by `openeb-core`. They expose what can be derived
+//! directly from the file contents.
 
 use crate::header::{Header, sensor_info_from_header};
 use openeb_core::hal::{
@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 /// File-backed ROI facility.
 ///
-/// TODO: confirm whether raw files are expected to preserve ROI state or merely
+/// TODO: confirm whether raw files are expected to preserve ROI state or
 /// expose a writable placeholder implementation.
 #[derive(Clone)]
 pub(crate) struct RawReaderROI {

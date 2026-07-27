@@ -1,9 +1,21 @@
+//! Error types used by the HAL and decoder layers.
+//!
+//! The error taxonomy is layered:
+//!
+//! - low-level `StreamError` and `DecoderProtocolViolation` values describe
+//!   local failures
+//! - `DecoderError`, `HardwareError`, and `ProcessingError` wrap those failures
+//!   in subsystem-specific contexts
+//! - `FacilityError` in `facilities.rs` aggregates them for the public facility API
+//! - `SharedError` erases the concrete error type for threaded dispatch
+
 use std::{error::Error, io, sync::Arc};
 use thiserror::Error;
 
-// Alias for any error that is thread safe and supports downcasting.
+/// Shared error type for threaded dispatch.
 pub type SharedError = Arc<dyn Error + Send + Sync>;
 
+/// HAL status codes that can be surfaced through the public APIs.
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum HALErrorCode {
     #[error("Camera error")]
@@ -34,6 +46,7 @@ pub enum HALErrorCode {
     MaximumRetriesExceeded = 0x105000,
 }
 
+/// Decoder protocol violations detected while parsing raw event words.
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum DecoderProtocolViolation {
     #[error("Unsupported Word {0}")]
@@ -56,6 +69,7 @@ pub enum DecoderProtocolViolation {
     OutOfBoundsEventCoordinate,
 }
 
+/// Stream-level errors raised by raw input sources.
 #[derive(Error, Debug)]
 pub enum StreamError {
     #[error("End of file reached")]
@@ -66,6 +80,7 @@ pub enum StreamError {
     Disconnected,
 }
 
+/// Errors that occur while decoding a raw event stream.
 #[derive(Error, Debug)]
 pub enum DecoderError {
     #[error("Protocol violation: {0}")]
@@ -78,6 +93,7 @@ pub enum DecoderError {
     HalStatus(#[from] HALErrorCode),
 }
 
+/// Errors produced by hardware register or identification operations.
 #[derive(Error, Debug)]
 pub enum HardwareError {
     #[error("HAL status error: {0}")]
@@ -86,6 +102,7 @@ pub enum HardwareError {
     RegisterRead { register: u32 },
 }
 
+/// Errors produced while applying or validating higher-level processing state.
 #[derive(Error, Debug)]
 pub enum ProcessingError {
     #[error("HAL status error: {0}")]

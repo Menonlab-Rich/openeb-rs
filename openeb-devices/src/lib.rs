@@ -10,7 +10,7 @@
 //! - `EventWindowIterator`, which consumes decoded events in batches or time windows
 //! - `RREventStreamDecoder`, which wraps the format-specific raw decoders
 //!
-//! The public API is intentionally built on top of the `openeb-core` facility
+//! The public API is built on top of the `openeb-core` facility
 //! model so that file-backed devices look like other devices in the workspace.
 
 pub mod device_macros;
