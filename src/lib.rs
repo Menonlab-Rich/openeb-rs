@@ -1,4 +1,7 @@
-//! OpenEB-style event camera abstractions and file-backed devices.
+//! OpenEB-inspired event camera abstractions and file-backed devices.
+//!
+//! `openevt` is independently maintained and is not endorsed or sponsored by
+//! Prophesee.
 //!
 //! The core HAL is always available. File-backed raw devices are enabled by
 //! the `devices` feature; the `all` feature enables every optional component.
@@ -9,7 +12,7 @@ pub use paste;
 // Compatibility aliases keep the folded modules' internal paths stable while
 // allowing downstream code to use this crate as one package.
 extern crate self as macros;
-extern crate self as openeb_core;
+extern crate self as openevt_core;
 extern crate self as utilities;
 
 /// Declares getter/setter methods for facility properties.
@@ -60,5 +63,11 @@ mod raw;
 #[path = "devices/types.rs"]
 pub mod types;
 
+#[cfg(feature = "python")]
+pub mod python;
+
 #[cfg(feature = "devices")]
-pub use raw::{EventWindowIterator, RREventStreamDecoder, RawFileHandler, RawFileReader};
+pub use raw::{
+    BufferReplenisher, EventWindowIterator, IterAsync, IterSync, RREventStreamDecoder,
+    RawFileHandler, RawFileReader,
+};

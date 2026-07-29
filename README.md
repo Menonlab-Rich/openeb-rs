@@ -1,14 +1,15 @@
-# openeb-rs
+# openevt
 
-`openeb-rs` is a single Rust crate for OpenEB-style event camera data and
-device abstractions.
+`openevt` is an independently maintained Rust crate for OpenEB-inspired event
+camera data and device abstractions. It is related to Prophesee's OpenEB only
+in spirit and is not endorsed, sponsored, or maintained by Prophesee.
 
 The HAL and shared buffer utilities are always available. File-backed raw
 device support is optional:
 
 ```toml
 [dependencies]
-openeb-rs = { version = "0.1", features = ["devices"] }
+openevt = { version = "0.1", features = ["devices"] }
 ```
 
 The `all` feature enables every optional component and is the default feature.
@@ -42,9 +43,9 @@ event stream, and decoder through the HAL device interface. The const generic
 sets the stream read-buffer size:
 
 ```rust,no_run
-use openeb::RawFileHandler;
-use openeb::hal::device::device::Device;
-use openeb::hal::facilities::FacilityType;
+use openevt::RawFileHandler;
+use openevt::hal::device::device::Device;
+use openevt::hal::facilities::FacilityType;
 
 let device = RawFileHandler::<131_072>::new_from_path("events.raw")?;
 let geometry = device
@@ -76,7 +77,31 @@ procedural-macro packages are no longer needed.
 cargo check                         # default/all features
 cargo check --no-default-features    # core only
 cargo test --all-features
+cargo build --features python       # optional Python/NumPy bindings
 ```
+
+To build Python wheels locally, install Maturin and run:
+
+```bash
+python -m pip install maturin
+maturin build --release
+```
+
+The resulting wheels are written to `target/wheels/`. Test them in a clean
+environment before uploading with `maturin publish` or a PyPI publishing
+tool. The published distribution and importable module are named `openevt`:
+
+```bash
+python -m pip install openevt
+```
+
+## Attribution and independence
+
+This project is a separate rewrite inspired by the architecture and event
+camera abstractions in [Prophesee's OpenEB](https://github.com/prophesee-ai/openeb).
+We gratefully credit the Prophesee team for that foundational work. `openevt`
+is independently maintained and is not affiliated with, endorsed by, or
+sponsored by Prophesee.
 
 The implementation is incomplete: EVT3 is the currently supported raw decoder,
 while EVT2, DAT, and HDF5 paths remain unfinished, and several facilities are

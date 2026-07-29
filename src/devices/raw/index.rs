@@ -7,8 +7,8 @@
 use crate::raw::decoder::RREventStreamDecoder;
 use crate::raw::stream::RREventStream;
 use crate::types::{DeviceFileError, FileIndex, IndexMarker};
-use openeb_core::hal::decoders::evt3::Evt3Decoder;
-use openeb_core::hal::facilities::EventsStreamDecoderFacility;
+use openevt_core::hal::decoders::evt3::Evt3Decoder;
+use openevt_core::hal::facilities::EventsStreamDecoderFacility;
 use std::io::{Read, Seek, SeekFrom};
 
 /// Builds a coarse timestamp index for a raw file.

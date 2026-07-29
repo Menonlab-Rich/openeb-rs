@@ -1,11 +1,11 @@
 //! File-backed implementations of core HAL facilities.
 //!
 //! These types adapt metadata found in a raw file header into the facility
-//! interfaces expected by `openeb-core`. They expose what can be derived
+//! interfaces expected by the OpenEB-inspired core. They expose what can be derived
 //! directly from the file contents.
 
 use crate::header::{Header, sensor_info_from_header};
-use openeb_core::hal::{
+use openevt_core::hal::{
     facilities::{
         ConnectionType, FacilityResult, GeometryFacility, HWIdentificationFacility, ROIFacility,
         SensorInfo, SystemInfo,
@@ -45,12 +45,12 @@ impl ROIFacility for RawReaderROI {
         Ok(())
     }
 
-    fn set_roi(&mut self, region: openeb_core::hal::types::Region) -> FacilityResult<()> {
+    fn set_roi(&mut self, region: openevt_core::hal::types::Region) -> FacilityResult<()> {
         self.roi_ = Some(region);
         Ok(())
     }
 
-    fn set_rois(&mut self, regions: &[openeb_core::hal::types::Region]) -> FacilityResult<()> {
+    fn set_rois(&mut self, regions: &[openevt_core::hal::types::Region]) -> FacilityResult<()> {
         self.rois_ = Some(regions.to_vec());
         Ok(())
     }

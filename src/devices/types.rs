@@ -5,8 +5,8 @@
 
 use crossbeam::channel::TryRecvError;
 
-pub use openeb_core::hal::types::{EventCD, EventExtTrigger};
-use openeb_core::hal::{
+pub use openevt_core::hal::types::{EventCD, EventExtTrigger};
+use openevt_core::hal::{
     decoders::evt3::{DecoderTimingState, Evt3Decoder},
     facilities::{self, FacilityError},
 };

@@ -5,8 +5,8 @@
 //! has started and whether EOF has already been reached.
 
 use crate::types::RawEventBuffer;
-use openeb_core::hal::errors::StreamError;
-use openeb_core::hal::facilities::{EventsStreamFacility, FacilityError, FacilityResult};
+use openevt_core::hal::errors::StreamError;
+use openevt_core::hal::facilities::{EventsStreamFacility, FacilityError, FacilityResult};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 

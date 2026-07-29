@@ -1,14 +1,14 @@
 use super::RawFileReader;
 use super::device::RawFileHandler;
 use super::stream::RREventStream;
-use openeb_core::hal::device::device::Device;
-use openeb_core::hal::errors::StreamError;
-use openeb_core::hal::facilities::EventsStreamFacility;
-use openeb_core::hal::facilities::{
+use openevt_core::hal::device::device::Device;
+use openevt_core::hal::errors::StreamError;
+use openevt_core::hal::facilities::EventsStreamFacility;
+use openevt_core::hal::facilities::{
     EventDecoderFacilityHandle, EventsStreamDecoderFacilityHandle, EventsStreamFacilityHandle,
     FacilityError, FacilityType,
 };
-use openeb_core::hal::types::EventCD;
+use openevt_core::hal::types::EventCD;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
@@ -169,7 +169,7 @@ fn opened_reader_exposes_geometry_and_roi_facilities() -> TestResult {
 
 #[test]
 fn stream_requires_start_and_reports_eof_until_repositioned() -> TestResult {
-    let path = std::env::temp_dir().join(format!("openeb-stream-{}", std::process::id()));
+    let path = std::env::temp_dir().join(format!("openevt-stream-{}", std::process::id()));
     {
         let mut file = File::create(&path)?;
         file.write_all(&[10, 20, 30])?;
@@ -237,16 +237,17 @@ fn sync_iterator_caps_batches_and_preserves_leftovers() -> TestResult {
     let stream: Arc<RwLock<dyn EventsStreamFacility + Send>> = Arc::new(RwLock::new(
         RREventStream::<2>::new(File::open(sample_raw_path())?),
     ));
-    let decoder: Arc<RwLock<dyn openeb_core::hal::facilities::EventsStreamDecoderFacility + Send>> =
-        Arc::new(RwLock::new(crate::raw::decoder::RREventStreamDecoder::new(
-            &crate::header::Header {
-                format: crate::types::FileFormat::EVT3,
-                width: 1280,
-                height: 720,
-                metadata: Default::default(),
-            },
-            true,
-        )));
+    let decoder: Arc<
+        RwLock<dyn openevt_core::hal::facilities::EventsStreamDecoderFacility + Send>,
+    > = Arc::new(RwLock::new(crate::raw::decoder::RREventStreamDecoder::new(
+        &crate::header::Header {
+            format: crate::types::FileFormat::EVT3,
+            width: 1280,
+            height: 720,
+            metadata: Default::default(),
+        },
+        true,
+    )));
     let mut iter =
         super::iterator::EventWindowIterator::<2>::new(receiver, (720, 1280), stream, decoder)
             .into_async();

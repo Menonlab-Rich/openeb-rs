@@ -14,7 +14,7 @@ use std::{
 };
 
 use crossbeam::channel::Receiver;
-use openeb_core::hal::{
+use openevt_core::hal::{
     errors::StreamError,
     facilities::{EventsStreamDecoderFacility, EventsStreamFacility, FacilityError},
     types::EventCD,

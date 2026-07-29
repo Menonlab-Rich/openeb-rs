@@ -1,14 +1,14 @@
 use crate::header::Header;
 use crate::types::FileFormat;
 use crossbeam::channel::Receiver;
-use openeb_core::hal::decoders::evt3::{DecoderTimingState, Evt3Decoder};
-use openeb_core::hal::decoders::raw_fmt_decoder::RawFormatDecoder;
-use openeb_core::hal::errors::SharedError;
-use openeb_core::hal::facilities::{
+use openevt_core::hal::decoders::evt3::{DecoderTimingState, Evt3Decoder};
+use openevt_core::hal::decoders::raw_fmt_decoder::RawFormatDecoder;
+use openevt_core::hal::errors::SharedError;
+use openevt_core::hal::facilities::{
     BaseDecoderFacility, EventDecoderFacility, EventsStreamDecoderFacility, FacilityError,
     FacilityResult,
 };
-use openeb_core::hal::types::EventCD;
+use openevt_core::hal::types::EventCD;
 use std::sync::{Arc, RwLock};
 use utilities::buffer::PooledBuffer;
 
@@ -74,7 +74,7 @@ impl EventDecoderFacility for RREventStreamDecoder {
 
     fn subscribe_to_ext_events(
         &mut self,
-    ) -> Receiver<Arc<PooledBuffer<openeb_core::hal::types::EventExtTrigger>>> {
+    ) -> Receiver<Arc<PooledBuffer<openevt_core::hal::types::EventExtTrigger>>> {
         self.inner.write().unwrap().subscribe_to_ext_events()
     }
 }

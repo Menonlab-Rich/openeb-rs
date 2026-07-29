@@ -1,5 +1,5 @@
 use crate::types::{DeviceFileError, FileFormat};
-use openeb_core::hal::facilities::SensorInfo;
+use openevt_core::hal::facilities::SensorInfo;
 use std::collections::HashMap;
 use std::io::BufRead;
 

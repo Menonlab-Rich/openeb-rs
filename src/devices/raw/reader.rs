@@ -17,12 +17,12 @@ use crate::raw::{IterUnconfigured, index};
 use crate::types::{DeviceFileError, FileIndex};
 use crossbeam::channel::Receiver;
 use num_traits::ToPrimitive;
-use openeb_core::hal::device::device::Device;
-use openeb_core::hal::facilities::{
+use openevt_core::hal::device::device::Device;
+use openevt_core::hal::facilities::{
     EventDecoderFacilityHandle, EventsStreamDecoderFacilityHandle, EventsStreamFacility,
     EventsStreamFacilityHandle, FacilityError, FacilityType, ROIFacilityHandle,
 };
-use openeb_core::hal::types::{EventCD, EventExtTrigger};
+use openevt_core::hal::types::{EventCD, EventExtTrigger};
 use std::sync::Arc;
 use utilities::buffer::PooledBuffer;
 
