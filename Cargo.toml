@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "openeb-rs"]
+resolver = "3"
+
 [package]
 name = "openevt"
 version = "0.1.2"

@@ -1,0 +1,22 @@
+[package]
+name = "openeb-rs"
+version = "0.2.0"
+edition = "2024"
+authors = ["Rich Baird <rich@rbaird.me>"]
+description = "Deprecated compatibility crate for openevt"
+license = "MIT"
+repository = "https://github.com/richbai90/openevt"
+documentation = "https://docs.rs/openeb-rs"
+
+[features]
+default = ["all"]
+all = ["devices"]
+devices = ["openevt/devices"]
+python = ["openevt/python"]
+
+[dependencies]
+openevt = { path = "..", version = "0.1.2", default-features = false }
+
+[lib]
+name = "openeb_rs"
+path = "src/lib.rs"
