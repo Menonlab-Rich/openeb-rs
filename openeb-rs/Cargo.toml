@@ -10,12 +10,14 @@ documentation = "https://docs.rs/openeb-rs"
 
 [features]
 default = ["all"]
-all = ["devices"]
+all = ["devices", "framegen", "plugins"]
 devices = ["openevt/devices"]
+framegen = ["openevt/framegen"]
+plugins = ["openevt/plugins"]
 python = ["openevt/python"]
 
 [dependencies]
-openevt = { path = "..", version = "0.1.2", default-features = false }
+openevt = { path="..", version = "0.2.1", default-features = false }
 
 [lib]
 name = "openeb_rs"

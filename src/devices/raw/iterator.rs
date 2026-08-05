@@ -156,9 +156,31 @@ impl<const BUFFER_SIZE: usize, State> EventWindowIterator<BUFFER_SIZE, State> {
     where
         Self: BufferReplenisher,
     {
-        let mut batch = Vec::with_capacity(BUFFER_SIZE);
+        self.next_up_to(BUFFER_SIZE)
+    }
 
-        while batch.len() < BUFFER_SIZE {
+    /// Returns the next `n` decoded CD events, or fewer if the stream ends.
+    ///
+    /// The requested count must be smaller than the iterator buffer size.
+    /// Events beyond `n` remain available for the next call.
+    pub fn next_n(&mut self, n: usize) -> Result<Vec<EventCD>, DeviceFileError>
+    where
+        Self: BufferReplenisher,
+    {
+        assert!(
+            n < BUFFER_SIZE,
+            "requested event count must be smaller than the iterator buffer size"
+        );
+        self.next_up_to(n)
+    }
+
+    fn next_up_to(&mut self, limit: usize) -> Result<Vec<EventCD>, DeviceFileError>
+    where
+        Self: BufferReplenisher,
+    {
+        let mut batch = Vec::with_capacity(limit);
+
+        while batch.len() < limit {
             if self.internal_buffer.is_empty() {
                 if let Err(error) = self.replenish_buffer() {
                     if !batch.is_empty() && is_end_of_file(&error) {

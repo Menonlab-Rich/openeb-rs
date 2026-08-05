@@ -1,10 +1,10 @@
 [workspace]
-members = [".", "openeb-rs"]
+members = [".", "openeb-rs", "openevt-plugins"]
 resolver = "3"
 
 [package]
 name = "openevt"
-version = "0.1.2"
+version = "0.2.1"
 edition = "2024"
 authors = ["Rich Baird <rich@rbaird.me>"]
 description = "An independently maintained Rust implementation inspired by Prophesee's OpenEB event-camera abstractions"
@@ -15,12 +15,15 @@ exclude = [".ccls-cache"]
 
 [features]
 default = ["all"]
-all = ["devices"]
+all = ["devices", "framegen", "plugins"]
 devices = ["dep:num-traits", "dep:regex"]
-python = ["devices", "dep:pyo3", "dep:numpy"]
+python = ["devices", "plugins", "dep:pyo3", "dep:numpy"]
+framegen = ["dep:abi_stable"]
+plugins = ["dep:abi_stable"]
 
 [dependencies]
 anyhow = "1.0.100"
+abi_stable = { version = "0.11.3", optional = true }
 thiserror = "2.0.18"
 log = "0.4.29"
 crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }

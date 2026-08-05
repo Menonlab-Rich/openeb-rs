@@ -47,6 +47,8 @@ macro_rules! pack_facility {
 
 /// Recyclable buffers used by event decoders and dispatchers.
 pub mod buffer;
+#[cfg(feature = "framegen")]
+pub mod framegen;
 /// Shared HAL abstractions.
 pub mod hal;
 
@@ -66,8 +68,7 @@ pub mod types;
 #[cfg(feature = "python")]
 pub mod python;
 
+#[cfg(all(feature = "devices", feature = "plugins"))]
+pub use raw::RawFilePlugin;
 #[cfg(feature = "devices")]
-pub use raw::{
-    BufferReplenisher, EventWindowIterator, IterAsync, IterSync, RREventStreamDecoder,
-    RawFileHandler, RawFileReader,
-};
+pub use raw::{BufferReplenisher, EventWindowIterator, IterAsync, IterSync, RREventStreamDecoder};

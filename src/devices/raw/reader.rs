@@ -1,7 +1,7 @@
 //! High-level API for reading raw event files.
 //!
-//! `RawFileReader` is the main public entry point in this crate. It opens a
-//! file, wires up the stream and decoder facilities, and provides helper
+//! `RawFileReader` is the private implementation used by the raw-file plugin.
+//! It opens a file, wires up the stream and decoder facilities, and provides helper
 //! methods for:
 //!
 //! - subscribing to decoded CD or external-trigger batches

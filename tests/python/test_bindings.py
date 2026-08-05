@@ -6,6 +6,8 @@ they do not require maturin or a separately installed wheel.
 
 import asyncio
 import importlib.util
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -27,6 +29,14 @@ def openevt():
     )
     extension = next((ROOT / "target" / "debug").glob("libopenevt*.so"))
 
+    # The Python extension and the raw-file plugin are built from the same
+    # crate, but the plugin must be loaded as a separate shared-library
+    # instance across the ABI boundary.
+    plugin_dir = ROOT / "target" / "debug" / "python-plugin"
+    plugin_dir.mkdir(exist_ok=True)
+    shutil.copy2(extension, plugin_dir / "libopenevt_raw_file.so")
+    os.environ["OPENEVT_PLUGIN_PATH"] = str(plugin_dir)
+
     spec = importlib.util.spec_from_file_location("openevt", extension)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -43,11 +53,7 @@ def test_module_registers_binding_classes(openevt):
 
 
 def test_reader_lifecycle_and_metadata(openevt):
-    reader = openevt.RawFileReader()
-    assert not reader.ready()
-
-    reader.try_open(str(SAMPLE_RAW), False)
-
+    reader = openevt.RawFileReader(str(SAMPLE_RAW))
     assert reader.ready()
     assert reader.t_min() is None
     assert reader.t_max() is None
@@ -72,6 +78,32 @@ def test_sync_iterator_is_pythonic_and_returns_structured_numpy(openevt):
     assert batch["x"].dtype == np.dtype("u2")
     assert batch["p"].dtype == np.dtype("u1")
     assert batch["t"].dtype == np.dtype("u8")
+
+
+def test_sync_iterator_exposes_batch_and_time_windows(openevt):
+    reader = openevt.RawFileReader(str(SAMPLE_RAW))
+    iterator = reader.iter()
+
+    batch = iterator.next_batch()
+    assert isinstance(batch, np.ndarray)
+    assert batch.size > 0
+
+    time_window = iterator.next_delta(10_000)
+    assert isinstance(time_window, np.ndarray)
+    assert time_window.dtype.names == ("x", "y", "p", "t")
+    assert np.all(time_window["t"] < batch["t"][-1] + 10_000)
+
+
+def test_sync_iterator_next_n_preserves_remaining_events(openevt):
+    reader = openevt.RawFileReader(str(SAMPLE_RAW))
+    iterator = reader.iter()
+
+    first = iterator.next_n(10)
+    second = iterator.next_n(10)
+
+    assert first.size == 10
+    assert second.size == 10
+    assert first["t"][-1] <= second["t"][0]
 
 
 def test_receiver_try_recv_returns_a_numpy_batch(openevt):

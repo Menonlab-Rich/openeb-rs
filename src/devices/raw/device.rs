@@ -22,8 +22,7 @@ use std::sync::Arc;
 /// [`Device::get_facility`] and convert the returned [`FacilityHandle`] into
 /// the corresponding typed handle.
 ///
-/// This is the low-level device API. Applications that only need decoded
-/// events will generally prefer [`crate::RawFileReader`].
+/// This is the low-level implementation used by the raw-file plugin.
 pub struct RawFileHandler<const N: usize> {
     header: Arc<Header>,
     facilities: HashMap<FacilityType, FacilityHandle>,
