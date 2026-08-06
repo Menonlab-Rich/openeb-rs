@@ -1,12 +1,12 @@
 use super::RawFileReader;
 use super::device::RawFileHandler;
-use super::stream::RREventStream;
+use super::stream::RawEventStream;
 use openevt_core::hal::device::device::Device;
 use openevt_core::hal::errors::StreamError;
-use openevt_core::hal::facilities::EventsStreamFacility;
+use openevt_core::hal::facilities::RawEventStreamFacility;
 use openevt_core::hal::facilities::{
-    EventDecoderFacilityHandle, EventsStreamDecoderFacilityHandle, EventsStreamFacilityHandle,
-    FacilityError, FacilityType,
+    EventSubscriptionFacilityHandle, FacilityError, FacilityType,
+    RawEventStreamDecoderFacilityHandle, RawEventStreamFacilityHandle,
 };
 use openevt_core::hal::types::EventCD;
 use std::fs::File;
@@ -37,30 +37,33 @@ fn test_read_and_decode_raw_evt3() -> TestResult {
         "Failed to initialize device from path. Check if the file exists and the header is valid.",
     );
 
-    let stream_handle: EventsStreamFacilityHandle = device
-        .get_facility(FacilityType::EventsStreamFacility)
-        .expect("EventsStreamFacility was not registered")
+    let stream_handle: RawEventStreamFacilityHandle = device
+        .get_facility(FacilityType::RawEventStreamFacility)
+        .expect("RawEventStreamFacility was not registered")
         .try_into()
         .unwrap();
 
     let mut stream = stream_handle.write().unwrap();
 
-    let decoder_handle: EventsStreamDecoderFacilityHandle = device
-        .get_facility(FacilityType::EventsStreamDecoderFacility)
-        .expect("EventsStreamDecoderFacility was not registered")
+    let decoder_handle: RawEventStreamDecoderFacilityHandle = device
+        .get_facility(FacilityType::RawEventStreamDecoderFacility)
+        .expect("RawEventStreamDecoderFacility was not registered")
         .try_into()
         .unwrap();
 
-    let event_decoder_handle: EventDecoderFacilityHandle = device
-        .get_facility(FacilityType::EventDecoderFacility)
-        .expect("EventDecoderFacility was not registered")
+    let event_decoder_handle: EventSubscriptionFacilityHandle = device
+        .get_facility(FacilityType::EventSubscriptionFacility)
+        .expect("EventSubscriptionFacility was not registered")
         .try_into()
         .unwrap();
 
     let mut decoder = decoder_handle.write().unwrap();
     let mut event_decoder = event_decoder_handle.write().unwrap();
 
-    let cd_receiver = event_decoder.subscribe_to_cd_events();
+    let (event_sender, cd_receiver) = crossbeam::channel::unbounded::<Vec<EventCD>>();
+    event_decoder.subscribe_to_cd_events(Box::new(move |events| {
+        let _ = event_sender.send(events.to_vec());
+    }))?;
 
     stream.start().expect("Failed to start stream");
 
@@ -72,7 +75,7 @@ fn test_read_and_decode_raw_evt3() -> TestResult {
             Ok((buffer, size)) => {
                 chunks_processed += 1;
                 total_bytes_read += size;
-                decoder.decode(buffer)?;
+                decoder.decode(&buffer)?;
 
                 while let Ok(event_batch) = cd_receiver.try_recv() {
                     for event in event_batch.iter() {
@@ -175,7 +178,7 @@ fn stream_requires_start_and_reports_eof_until_repositioned() -> TestResult {
         file.write_all(&[10, 20, 30])?;
     }
     let file = File::open(&path)?;
-    let mut stream = RREventStream::<2>::new(file);
+    let mut stream = RawEventStream::<2>::new(file);
 
     assert!(matches!(
         stream.poll_buffer(),
@@ -207,9 +210,7 @@ fn stream_requires_start_and_reports_eof_until_repositioned() -> TestResult {
 #[test]
 fn sync_iterator_caps_batches_and_preserves_leftovers() -> TestResult {
     let (sender, receiver) = crossbeam::channel::unbounded();
-    let (return_sender, _) = crossbeam::channel::unbounded();
-    let buffer = utilities::buffer::PooledBuffer {
-        buffer: Some(vec![
+    let events = vec![
             EventCD {
                 x: 1,
                 y: 2,
@@ -228,18 +229,16 @@ fn sync_iterator_caps_batches_and_preserves_leftovers() -> TestResult {
                 p: true,
                 t: 12,
             },
-        ]),
-        return_channel: return_sender,
-    };
-    sender.send(Arc::new(buffer))?;
+        ];
+    sender.send(events)?;
     drop(sender);
 
-    let stream: Arc<RwLock<dyn EventsStreamFacility + Send>> = Arc::new(RwLock::new(
-        RREventStream::<2>::new(File::open(sample_raw_path())?),
+    let stream: Arc<RwLock<dyn RawEventStreamFacility + Send>> = Arc::new(RwLock::new(
+        RawEventStream::<2>::new(File::open(sample_raw_path())?),
     ));
     let decoder: Arc<
-        RwLock<dyn openevt_core::hal::facilities::EventsStreamDecoderFacility + Send>,
-    > = Arc::new(RwLock::new(crate::raw::decoder::RREventStreamDecoder::new(
+        RwLock<dyn openevt_core::hal::facilities::RawEventStreamDecoderFacility + Send>,
+    > = Arc::new(RwLock::new(crate::raw::decoder::RawEventStreamDecoder::new(
         &crate::header::Header {
             format: crate::types::FileFormat::EVT3,
             width: 1280,

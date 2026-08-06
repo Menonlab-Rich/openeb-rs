@@ -59,10 +59,11 @@ pub enum DeviceFileError {
     NotInitialized,
 }
 
-/// Placeholder error type for iterator-specific failures.
+/// Reserved error type for iterator-specific failures.
 ///
-/// TODO: define concrete iterator failure modes or remove this type if it is no
-/// longer needed by the public API.
+/// The current iterator methods report [`DeviceFileError`] directly. This empty
+/// type remains available for a future API split if iterator failures need to
+/// be distinguished from file and facility failures.
 #[derive(Error, Debug)]
 pub enum IteratorError {}
 
@@ -102,9 +103,9 @@ impl Display for FileFormat {
 
 /// Decoder selection used by higher-level code.
 ///
-/// TODO: this currently only models the EVT3 decoder path. Either expand this
-/// enum or replace it with a more direct abstraction if additional formats are
-/// added.
+/// EVT3 is currently the only concrete decoder stored here. Other file formats
+/// are represented by [`FormatDecoder::Unknown`] until their decoder support is
+/// implemented.
 pub enum FormatDecoder {
     /// EVT3 decoder implementation.
     Evt3(Evt3Decoder),

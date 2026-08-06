@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct EvsParameters {
     // --- Physical and Circuit Constants ---
     /// Gain of the inverting amplifier in the feedback path of the logarithmic amplifier.
@@ -45,6 +45,69 @@ pub struct EvsParameters {
     pub threshold_off: f32,
 }
 
+impl Default for EvsParameters {
+    fn default() -> Self {
+        Self {
+            a: 1.0,
+            c_c: 1.0,
+            c_lsf: 1.0,
+            zeta: 1.2,
+            v_t: 0.02585,
+            i_d1_t0: 1.0,
+            i_d2_t0: 1.0,
+            i_sf: 1.0,
+            dt: 0.01,
+            tau_fe: 1.0,
+            tau_o1: 1.0,
+            threshold_on: 0.1,
+            threshold_off: 0.1,
+        }
+    }
+}
+
+impl EvsParameters {
+    /// Validates the physical and numerical constants before simulation starts.
+    pub fn validate(&self) -> Result<(), String> {
+        let values = [
+            ("a", self.a),
+            ("c_c", self.c_c),
+            ("c_lsf", self.c_lsf),
+            ("zeta", self.zeta),
+            ("v_t", self.v_t),
+            ("i_d1_t0", self.i_d1_t0),
+            ("i_d2_t0", self.i_d2_t0),
+            ("i_sf", self.i_sf),
+            ("dt", self.dt),
+            ("tau_fe", self.tau_fe),
+            ("tau_o1", self.tau_o1),
+            ("threshold_on", self.threshold_on),
+            ("threshold_off", self.threshold_off),
+        ];
+        if let Some((name, _)) = values.iter().find(|(_, value)| !value.is_finite()) {
+            return Err(format!("simulation parameter `{name}` must be finite"));
+        }
+        for (name, value) in [
+            ("c_c", self.c_c),
+            ("c_lsf", self.c_lsf),
+            ("zeta", self.zeta),
+            ("v_t", self.v_t),
+            ("i_d1_t0", self.i_d1_t0),
+            ("i_d2_t0", self.i_d2_t0),
+            ("i_sf", self.i_sf),
+            ("dt", self.dt),
+            ("tau_fe", self.tau_fe),
+            ("tau_o1", self.tau_o1),
+            ("threshold_on", self.threshold_on),
+            ("threshold_off", self.threshold_off),
+        ] {
+            if value <= 0.0 {
+                return Err(format!("simulation parameter `{name}` must be positive"));
+            }
+        }
+        Ok(())
+    }
+}
+
 pub struct EvsState {
     pub dphi_fe: Vec<f32>,
     pub dphi_o1: Vec<f32>,
@@ -57,6 +120,51 @@ pub struct Event {
     pub timestamp: f32,
     pub pixel_index: usize,
     pub polarity: bool, // true for ON, false for OFF
+}
+
+/// Stateful event-camera simulator that consumes one photocurrent frame at a
+/// time and emits the CD events generated at that frame's timestamp.
+pub struct EvsSimulator {
+    params: EvsParameters,
+    state: EvsState,
+}
+
+impl EvsSimulator {
+    /// Creates a simulator for a sensor containing `num_pixels` pixels.
+    pub fn new(num_pixels: usize, params: EvsParameters) -> Result<Self, String> {
+        params.validate()?;
+        Ok(Self {
+            params,
+            state: EvsState::new(num_pixels),
+        })
+    }
+
+    /// Feeds one frame of photocurrents and returns its generated CD events.
+    pub fn process_frame(
+        &mut self,
+        photocurrents: &[f32],
+        timestamp: f32,
+    ) -> Result<Vec<Event>, String> {
+        if photocurrents.len() != self.state.dphi_fe.len() {
+            return Err(format!(
+                "frame contains {} pixels, expected {}",
+                photocurrents.len(),
+                self.state.dphi_fe.len()
+            ));
+        }
+        let zeros = vec![0.0; photocurrents.len()];
+        let mut events = Vec::new();
+        step_forward_euler(
+            &mut self.state,
+            &self.params,
+            timestamp,
+            photocurrents,
+            &zeros,
+            &zeros,
+            &mut events,
+        );
+        Ok(events)
+    }
 }
 
 impl EvsState {
@@ -99,7 +207,8 @@ pub fn step_forward_euler(
 
     for i in 0..num_pixels {
         // 1. Logarithmic Amplifier ODE Integration
-        let d_dphi_fe = fe_coeff_1 * i_pd[i] - fe_coeff_2 * (fe_exp_scale * state.dphi_fe[i]).exp();
+        let fe_exponent = (fe_exp_scale * state.dphi_fe[i]).clamp(-80.0, 80.0);
+        let d_dphi_fe = fe_coeff_1 * i_pd[i] - fe_coeff_2 * fe_exponent.exp();
         state.dphi_fe[i] += d_dphi_fe * dt;
 
         // 2. Front-End Autoregressive Noise Update
@@ -112,7 +221,9 @@ pub fn step_forward_euler(
         let d_dphi_o1 = o1_coeff_1
             * (params.i_sf
                 - params.i_d2_t0
-                    * ((params.zeta * state.dphi_o1[i] - noisy_fe) / o1_exp_denom).exp());
+                    * (((params.zeta * state.dphi_o1[i] - noisy_fe) / o1_exp_denom)
+                        .clamp(-80.0, 80.0)
+                        .exp()));
         state.dphi_o1[i] += d_dphi_o1 * dt;
 
         // 4. Source Follower Autoregressive Noise Update
@@ -141,5 +252,22 @@ pub fn step_forward_euler(
             // Reset reference voltage upon firing
             state.ref_voltage[i] = noisy_o1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_simulator_accepts_a_frame() {
+        let mut simulator = EvsSimulator::new(2, EvsParameters::default()).unwrap();
+        assert!(simulator.process_frame(&[0.0, 1.0], 42.0).is_ok());
+    }
+
+    #[test]
+    fn simulator_rejects_a_frame_with_wrong_dimensions() {
+        let mut simulator = EvsSimulator::new(2, EvsParameters::default()).unwrap();
+        assert!(simulator.process_frame(&[1.0], 42.0).is_err());
     }
 }

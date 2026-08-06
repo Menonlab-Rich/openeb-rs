@@ -1,176 +1,94 @@
-//! Dispatchers used by decoders to publish decoded batches and errors.
-//!
-//! These are small fan-out utilities built on `crossbeam` channels. They are
-//! lossy under backpressure: if a subscriber stops draining its
-//! queue, the dispatcher drops that batch for that subscriber rather than
-//! blocking the decoder.
+//! Callback dispatchers used by native decoder implementations.
 
-use std::{
-    any::TypeId,
-    collections::HashMap,
-    error::Error,
-    sync::{Arc, RwLock},
-};
+use std::{any::TypeId, collections::HashMap, error::Error, sync::{Arc, Mutex, RwLock}};
 
-use crate::hal::{
-    errors::SharedError,
-    types::{EventCD, EventExtTrigger},
-};
-use crossbeam::channel::{Receiver, Sender, TrySendError, bounded};
-use log::{debug, warn};
-use utilities::buffer::PooledBuffer;
+use crate::hal::{errors::SharedError, types::{EventCD, EventExtTrigger}};
 
-/// Routes typed errors to subscribers that asked for that exact error type.
+type ErrorCallback = Box<dyn FnMut(SharedError) + Send + 'static>;
+type CDCallback = Box<dyn FnMut(&[EventCD]) + Send + 'static>;
+type ExtCallback = Box<dyn FnMut(&[EventExtTrigger]) + Send + 'static>;
+
+/// Routes typed decoder errors to registered callbacks.
+///
+/// Subscribers are keyed by the concrete error type. Dispatching an error
+/// invokes every callback registered for that exact type.
 pub struct ErrorDispatcher {
-    subscribers: RwLock<HashMap<TypeId, Vec<Sender<SharedError>>>>,
-    channel_capacity: usize,
+    subscribers: RwLock<HashMap<TypeId, Vec<Arc<Mutex<ErrorCallback>>>>>,
 }
 
 impl Default for ErrorDispatcher {
-    fn default() -> Self {
-        ErrorDispatcher::new(1024)
-    }
+    fn default() -> Self { Self::new(0) }
 }
 
 impl ErrorDispatcher {
-    /// Creates a dispatcher with a fixed channel capacity for all subscribers.
-    pub fn new(channel_capacity: usize) -> Self {
-        Self {
-            subscribers: RwLock::new(HashMap::new()),
-            channel_capacity,
-        }
-    }
-
-    /// Subscribes to errors of type `T`.
+    /// Creates an empty dispatcher.
     ///
-    /// The returned receiver yields `SharedError` values that can be downcast
-    /// by the consumer if needed.
-    pub fn subscribe<T: Error + 'static>(&self) -> Receiver<SharedError> {
-        let (tx, rx) = bounded(self.channel_capacity);
-        let type_id = TypeId::of::<T>();
-
-        let mut subs = self.subscribers.write().unwrap();
-        subs.entry(type_id).or_default().push(tx);
-
-        rx
+    /// `capacity` is retained for API compatibility; callbacks are stored in a
+    /// growable map and the value does not currently reserve storage.
+    pub fn new(_capacity: usize) -> Self {
+        Self { subscribers: RwLock::new(HashMap::new()) }
     }
 
-    /// Removes all subscribers for the given error type.
+    /// Registers a callback for errors of type `T`.
+    pub fn subscribe<T: Error + 'static>(&self, callback: ErrorCallback) {
+        self.subscribers.write().unwrap()
+            .entry(TypeId::of::<T>()).or_default()
+            .push(Arc::new(Mutex::new(callback)));
+    }
+
+    /// Removes all callbacks registered for `T`, returning whether any existed.
     pub fn unsubscribe<T: Error + 'static>(&self) -> bool {
-        let type_id = TypeId::of::<T>();
-        let mut subs = self.subscribers.write().unwrap();
-        subs.remove(&type_id).is_some()
+        self.subscribers.write().unwrap().remove(&TypeId::of::<T>()).is_some()
     }
 
-    /// Dispatches one error value to all current subscribers of the same type.
-    ///
-    /// Slow subscribers drop the message but remain registered.
+    /// Delivers an error to all callbacks registered for its concrete type.
     pub fn dispatch<T: Error + Send + Sync + 'static>(&self, error: T) {
-        let type_id = TypeId::of::<T>();
-        let shared_error: SharedError = Arc::new(error);
-
-        let mut subs = self.subscribers.write().unwrap();
-
-        if let Some(senders) = subs.get_mut(&type_id) {
-            senders.retain(|tx| {
-                match tx.try_send(Arc::clone(&shared_error)) {
-                    Ok(_) => true,
-                    // The receiver is active but the queue is full.
-                    // Keep the channel registered, but drop this specific message for this consumer.
-                    Err(TrySendError::Full(_)) => {
-                        // A dropped-message metric can be recorded here.
-                        true
-                    }
-                    // The receiver has been dropped. Remove the sender from the vector.
-                    Err(TrySendError::Disconnected(_)) => false,
-                }
-            });
+        let shared: SharedError = Arc::new(error);
+        if let Some(callbacks) = self.subscribers.write().unwrap().get_mut(&TypeId::of::<T>()) {
+            for callback in callbacks.iter() {
+                (callback.lock().unwrap())(Arc::clone(&shared));
+            }
         }
     }
 }
 
-/// Routes decoded event batches to subscribers.
+/// Delivers decoded CD and external-trigger batches to subscribers.
 pub struct EventDispatcher {
-    /// Subscribers for CD events.
-    cd_subscribers: RwLock<Vec<Sender<Arc<PooledBuffer<EventCD>>>>>,
-    /// Subscribers for external-trigger events.
-    ext_subscribers: RwLock<Vec<Sender<Arc<PooledBuffer<EventExtTrigger>>>>>,
+    cd_subscribers: RwLock<Vec<Arc<Mutex<CDCallback>>>>,
+    ext_subscribers: RwLock<Vec<Arc<Mutex<ExtCallback>>>>,
 }
 
 impl Default for EventDispatcher {
-    fn default() -> Self {
-        EventDispatcher::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 impl EventDispatcher {
     /// Creates an empty event dispatcher.
     pub fn new() -> Self {
-        EventDispatcher {
-            cd_subscribers: RwLock::new(Vec::new()),
-            ext_subscribers: RwLock::new(Vec::new()),
+        Self { cd_subscribers: RwLock::new(Vec::new()), ext_subscribers: RwLock::new(Vec::new()) }
+    }
+
+    /// Registers a callback for decoded change-detection batches.
+    pub fn subscribe_cd(&self, callback: CDCallback) {
+        self.cd_subscribers.write().unwrap().push(Arc::new(Mutex::new(callback)));
+    }
+
+    /// Registers a callback for decoded external-trigger batches.
+    pub fn subscribe_ext(&self, callback: ExtCallback) {
+        self.ext_subscribers.write().unwrap().push(Arc::new(Mutex::new(callback)));
+    }
+
+    /// Sends a change-detection batch to all CD subscribers.
+    pub fn send_cd(&self, events: &[EventCD]) {
+        for callback in self.cd_subscribers.read().unwrap().iter() {
+            (callback.lock().unwrap())(events);
         }
     }
 
-    /// Subscribes to decoded CD batches.
-    ///
-    /// `capacity` controls how many batches can queue before the dispatcher
-    /// starts dropping batches for that subscriber.
-    pub fn subscribe_cd(&self, capacity: usize) -> Receiver<Arc<PooledBuffer<EventCD>>> {
-        let (tx, rx) = bounded(capacity);
-        self.cd_subscribers.write().unwrap().push(tx);
-        rx
-    }
-
-    /// Subscribes to decoded external-trigger batches.
-    pub fn subscribe_ext(&self, capacity: usize) -> Receiver<Arc<PooledBuffer<EventExtTrigger>>> {
-        let (tx, rx) = bounded(capacity);
-        self.ext_subscribers.write().unwrap().push(tx);
-        rx
-    }
-
-    /// Broadcasts a CD batch to all subscribers.
-    ///
-    /// Full queues drop the batch for that subscriber. Disconnected subscribers
-    /// are removed.
-    pub fn send_cd(&self, events: Arc<PooledBuffer<EventCD>>) {
-        let mut subs = self.cd_subscribers.write().unwrap();
-
-        subs.retain(|tx| {
-            match tx.try_send(events.clone()) {
-                Ok(_) => true, // Successfully queued
-                Err(TrySendError::Full(_)) => {
-                    // Backpressure applied: The consumer is too slow.
-                    // We drop the batch for this consumer but keep them subscribed.
-                    warn!(
-                        "CD Event subscriber queue full. Dropping batch of {} events.",
-                        events.len()
-                    );
-                    true
-                }
-                Err(TrySendError::Disconnected(_)) => {
-                    // The consumer has been destroyed. Remove them from the routing table.
-                    debug!("CD Event subscriber disconnected. Removing from dispatcher.");
-                    false
-                }
-            }
-        });
-    }
-
-    /// Broadcasts an external-trigger batch to all subscribers.
-    pub fn send_ext(&self, events: Arc<PooledBuffer<EventExtTrigger>>) {
-        let mut subs = self.ext_subscribers.write().unwrap();
-
-        subs.retain(|tx| match tx.try_send(events.clone()) {
-            Ok(_) => true,
-            Err(TrySendError::Full(_)) => {
-                warn!("ExtTrigger subscriber queue full. Dropping batch.");
-                true
-            }
-            Err(TrySendError::Disconnected(_)) => {
-                debug!("ExtTrigger subscriber disconnected. Removing from dispatcher.");
-                false
-            }
-        });
+    /// Sends an external-trigger batch to all trigger subscribers.
+    pub fn send_ext(&self, events: &[EventExtTrigger]) {
+        for callback in self.ext_subscribers.read().unwrap().iter() {
+            (callback.lock().unwrap())(events);
+        }
     }
 }

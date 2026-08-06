@@ -4,14 +4,12 @@
 //! limited than the EVT3 decoder and may still need protocol-level completion in
 //! areas that are not exercised by the current reader path.
 
-use crossbeam::channel::{Receiver, Sender, bounded};
 use std::sync::Arc;
-use utilities::buffer::PooledBuffer;
 
 use crate::hal::dispatcher::{ErrorDispatcher, EventDispatcher};
-use crate::hal::errors::SharedError;
 use crate::hal::facilities::{
-    BaseDecoderFacility, EventDecoderFacility, EventsStreamDecoderFacility, FacilityResult,
+    RawDecoderFacility, DecoderErrorCallback, EventCDCallback, EventSubscriptionFacility,
+    EventExtTriggerCallback, RawEventStreamDecoderFacility, FacilityResult,
 };
 use crate::hal::types::{EventCD, EventExtTrigger};
 
@@ -40,10 +38,6 @@ pub struct Evt2Decoder {
     cd_buffer: Vec<EventCD>,
     ext_trigger_buffer: Vec<EventExtTrigger>,
 
-    cd_pool_tx: Sender<Vec<EventCD>>,
-    cd_pool_rx: Receiver<Vec<EventCD>>,
-    ext_pool_tx: Sender<Vec<EventExtTrigger>>,
-    ext_pool_rx: Receiver<Vec<EventExtTrigger>>,
 }
 
 impl Evt2Decoder {
@@ -58,9 +52,6 @@ impl Evt2Decoder {
 
     /// Creates a new EVT2 decoder for the supplied geometry.
     pub fn new(max_x: u16, max_y: u16, do_time_shift: bool) -> Self {
-        let (cd_pool_tx, cd_pool_rx) = bounded(32);
-        let (ext_pool_tx, ext_pool_rx) = bounded(32);
-
         Self {
             evt_dispatcher: Default::default(),
             err_dispatcher: Default::default(),
@@ -73,10 +64,6 @@ impl Evt2Decoder {
             split_bytes: Vec::with_capacity(4),
             cd_buffer: Vec::with_capacity(Self::BATCH_SIZE),
             ext_trigger_buffer: Vec::with_capacity(Self::BATCH_SIZE),
-            cd_pool_tx,
-            cd_pool_rx,
-            ext_pool_tx,
-            ext_pool_rx,
         }
     }
 
@@ -146,40 +133,18 @@ impl Evt2Decoder {
     /// Dispatches buffered CD and external-trigger events.
     fn dispatch(&mut self) {
         if !self.cd_buffer.is_empty() {
-            let new_buffer = self
-                .cd_pool_rx
-                .try_recv()
-                .unwrap_or_else(|_| Vec::with_capacity(Self::BATCH_SIZE));
-
-            let populated_buffer = std::mem::replace(&mut self.cd_buffer, new_buffer);
-
-            let pooled = PooledBuffer {
-                buffer: Some(populated_buffer),
-                return_channel: self.cd_pool_tx.clone(),
-            };
-
-            self.add_event_buffer(Arc::new(pooled));
+            let populated_buffer = std::mem::take(&mut self.cd_buffer);
+            self.evt_dispatcher.send_cd(&populated_buffer);
         }
 
         if !self.ext_trigger_buffer.is_empty() {
-            let new_buffer = self
-                .ext_pool_rx
-                .try_recv()
-                .unwrap_or_else(|_| Vec::with_capacity(Self::BATCH_SIZE));
-
-            let populated_buffer = std::mem::replace(&mut self.ext_trigger_buffer, new_buffer);
-
-            let pooled = PooledBuffer {
-                buffer: Some(populated_buffer),
-                return_channel: self.ext_pool_tx.clone(),
-            };
-
-            self.evt_dispatcher.send_ext(Arc::new(pooled));
+            let populated_buffer = std::mem::take(&mut self.ext_trigger_buffer);
+            self.evt_dispatcher.send_ext(&populated_buffer);
         }
     }
 }
 
-impl EventsStreamDecoderFacility for Evt2Decoder {
+impl RawEventStreamDecoderFacility for Evt2Decoder {
     /// Decodes a raw EVT2 byte buffer into typed events.
     fn decode(&mut self, raw_data: &[u8]) -> FacilityResult<()> {
         let mut data = raw_data;
@@ -251,10 +216,11 @@ impl EventsStreamDecoderFacility for Evt2Decoder {
     }
 }
 
-impl BaseDecoderFacility for Evt2Decoder {
+impl RawDecoderFacility for Evt2Decoder {
     /// Subscribes to decoder protocol violation errors.
-    fn subscribe_to_protocol_violation(&mut self) -> Receiver<SharedError> {
-        self.err_dispatcher.subscribe::<SharedError>()
+    fn subscribe_to_protocol_violation(&mut self, callback: DecoderErrorCallback) -> FacilityResult<()> {
+        self.err_dispatcher.subscribe::<crate::hal::errors::DecoderProtocolViolation>(callback);
+        Ok(())
     }
 
     /// Returns the EVT2 raw word size.
@@ -263,19 +229,16 @@ impl BaseDecoderFacility for Evt2Decoder {
     }
 }
 
-impl EventDecoderFacility for Evt2Decoder {
+impl EventSubscriptionFacility for Evt2Decoder {
     /// Subscribes to decoded CD event batches.
-    fn subscribe_to_cd_events(&mut self) -> Receiver<Arc<PooledBuffer<EventCD>>> {
-        self.evt_dispatcher.subscribe_cd(2048)
+    fn subscribe_to_cd_events(&mut self, callback: EventCDCallback) -> FacilityResult<()> {
+        self.evt_dispatcher.subscribe_cd(callback);
+        Ok(())
     }
 
     /// Subscribes to decoded external-trigger event batches.
-    fn subscribe_to_ext_events(&mut self) -> Receiver<Arc<PooledBuffer<EventExtTrigger>>> {
-        self.evt_dispatcher.subscribe_ext(2048)
-    }
-
-    /// Adds a decoded CD event buffer to the dispatcher.
-    fn add_event_buffer(&mut self, range: Arc<PooledBuffer<EventCD>>) {
-        self.evt_dispatcher.send_cd(range);
+    fn subscribe_to_ext_events(&mut self, callback: EventExtTriggerCallback) -> FacilityResult<()> {
+        self.evt_dispatcher.subscribe_ext(callback);
+        Ok(())
     }
 }

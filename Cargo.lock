@@ -503,7 +503,9 @@ dependencies = [
  "paste",
  "pyo3",
  "regex",
+ "serde",
  "thiserror",
+ "toml",
 ]
 
 [[package]]

@@ -43,9 +43,10 @@ For a developer-focused walkthrough of dynamic device plugins, see the
 [plugin development guide](docs/plugin-development-guide.md). Raw-file access
 is available exclusively through the [raw-file plugin](docs/raw-file-plugin.md);
 the native handler and reader remain private implementation details.
+The video simulator is documented in the [simulator plugin guide](docs/simulator-plugin.md).
 
 Set `OPENEVT_PLUGIN_PATH` to the directory containing the plugin before using a
-host or the Python bindings. Raw-file discovery uses `OPENEVT_RAW_FILES`.
+host layer or the Python bindings. Raw-file discovery uses `OPENEVT_RAW_FILES`.
 
 EVT3 decoding is currently supported; EVT2, DAT, and HDF5 decoder paths are not
 yet implemented.
@@ -56,11 +57,12 @@ procedural-macro packages are no longer needed.
 
 ## Runtime flow
 
-1. The host loads the raw-file plugin through `PluginRegistry`.
+1. The host layer loads the raw-file plugin through `PluginRegistry`.
 2. The plugin opens the discovered raw-file serial.
 3. Its private stream and decoder read and decode EVT3 data.
 4. Decoded events cross the ABI through `EventBatchSink` callbacks.
-5. Hosts subscribe to batches; optional indexing supports `seek`.
+5. Applications use the host layer API to subscribe to batches; optional indexing
+   supports `seek`.
 
 ## Building
 

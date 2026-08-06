@@ -1,26 +1,22 @@
 use crate::header::Header;
 use crate::types::FileFormat;
-use crossbeam::channel::Receiver;
 use openevt_core::hal::decoders::evt3::{DecoderTimingState, Evt3Decoder};
 use openevt_core::hal::decoders::raw_fmt_decoder::RawFormatDecoder;
-use openevt_core::hal::errors::SharedError;
 use openevt_core::hal::facilities::{
-    BaseDecoderFacility, EventDecoderFacility, EventsStreamDecoderFacility, FacilityError,
-    FacilityResult,
+    RawDecoderFacility, DecoderErrorCallback, EventCDCallback, EventSubscriptionFacility,
+    EventExtTriggerCallback, RawEventStreamDecoderFacility, FacilityError, FacilityResult,
 };
-use openevt_core::hal::types::EventCD;
 use std::sync::{Arc, RwLock};
-use utilities::buffer::PooledBuffer;
 
 #[derive(Clone)]
 /// Facility-backed decoder for the event format declared by a raw-file header.
-pub struct RREventStreamDecoder {
+pub struct RawEventStreamDecoder {
     inner: Arc<RwLock<Box<dyn RawFormatDecoder + Send + Sync>>>,
     /// Format selected from the input header.
     pub event_format: FileFormat,
 }
 
-impl RREventStreamDecoder {
+impl RawEventStreamDecoder {
     /// Creates a decoder for a parsed header.
     ///
     /// `do_time_shift` controls whether decoder timestamps are normalized.
@@ -63,23 +59,17 @@ impl RREventStreamDecoder {
     }
 }
 
-impl EventDecoderFacility for RREventStreamDecoder {
-    fn subscribe_to_cd_events(&mut self) -> Receiver<Arc<PooledBuffer<EventCD>>> {
-        self.inner.write().unwrap().subscribe_to_cd_events()
+impl EventSubscriptionFacility for RawEventStreamDecoder {
+    fn subscribe_to_cd_events(&mut self, callback: EventCDCallback) -> FacilityResult<()> {
+        self.inner.write().unwrap().subscribe_to_cd_events(callback)
     }
 
-    fn add_event_buffer(&mut self, range: Arc<PooledBuffer<EventCD>>) {
-        self.inner.write().unwrap().add_event_buffer(range)
-    }
-
-    fn subscribe_to_ext_events(
-        &mut self,
-    ) -> Receiver<Arc<PooledBuffer<openevt_core::hal::types::EventExtTrigger>>> {
-        self.inner.write().unwrap().subscribe_to_ext_events()
+    fn subscribe_to_ext_events(&mut self, callback: EventExtTriggerCallback) -> FacilityResult<()> {
+        self.inner.write().unwrap().subscribe_to_ext_events(callback)
     }
 }
 
-impl EventsStreamDecoderFacility for RREventStreamDecoder {
+impl RawEventStreamDecoderFacility for RawEventStreamDecoder {
     fn decode(&mut self, raw_data: &[u8]) -> FacilityResult<()> {
         self.inner.write().unwrap().decode(raw_data)
     }
@@ -112,12 +102,12 @@ impl EventsStreamDecoderFacility for RREventStreamDecoder {
     }
 }
 
-impl BaseDecoderFacility for RREventStreamDecoder {
-    fn subscribe_to_protocol_violation(&mut self) -> Receiver<SharedError> {
+impl RawDecoderFacility for RawEventStreamDecoder {
+    fn subscribe_to_protocol_violation(&mut self, callback: DecoderErrorCallback) -> FacilityResult<()> {
         self.inner
             .write()
             .unwrap()
-            .subscribe_to_protocol_violation()
+            .subscribe_to_protocol_violation(callback)
     }
 
     fn get_raw_event_size_bytes(&self) -> FacilityResult<u8> {

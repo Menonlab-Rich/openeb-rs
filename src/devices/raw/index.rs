@@ -4,11 +4,11 @@
 //! the reader seek near a target timestamp without decoding the entire file from
 //! the beginning.
 
-use crate::raw::decoder::RREventStreamDecoder;
-use crate::raw::stream::RREventStream;
+use crate::raw::decoder::RawEventStreamDecoder;
+use crate::raw::stream::RawEventStream;
 use crate::types::{DeviceFileError, FileIndex, IndexMarker};
 use openevt_core::hal::decoders::evt3::Evt3Decoder;
-use openevt_core::hal::facilities::EventsStreamDecoderFacility;
+use openevt_core::hal::facilities::RawEventStreamDecoderFacility;
 use std::io::{Read, Seek, SeekFrom};
 
 /// Builds a coarse timestamp index for a raw file.
@@ -87,8 +87,8 @@ pub(crate) fn build_index(
 pub(crate) fn seek_to_timestamp<const N: usize>(
     index: &FileIndex,
     target_timestamp: usize,
-    stream: &mut RREventStream<N>,
-    decoder: &mut RREventStreamDecoder,
+    stream: &mut RawEventStream<N>,
+    decoder: &mut RawEventStreamDecoder,
 ) -> Result<(), DeviceFileError> {
     if let Some(marker) = index.find_closest_marker(target_timestamp) {
         stream.seek_to_offset(marker.byte_offset)?;

@@ -1,24 +1,24 @@
 //! File-backed event stream implementation.
 //!
-//! This stream adapts a `File` to the `EventsStreamFacility` interface expected
+//! This stream adapts a `File` to the `RawEventStreamFacility` interface expected
 //! by the HAL. It reads fixed-size buffers and keeps track of whether the stream
 //! has started and whether EOF has already been reached.
 
 use crate::types::RawEventBuffer;
 use openevt_core::hal::errors::StreamError;
-use openevt_core::hal::facilities::{EventsStreamFacility, FacilityError, FacilityResult};
+use openevt_core::hal::facilities::{RawEventStreamFacility, FacilityError, FacilityResult};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
 /// Buffered file stream for raw event data.
-pub(crate) struct RREventStream<const N: usize> {
+pub(crate) struct RawEventStream<const N: usize> {
     file: File,
     buffer: RawEventBuffer<N>,
     eof: bool,
     started: bool,
 }
 
-impl<const N: usize> RREventStream<N> {
+impl<const N: usize> RawEventStream<N> {
     /// Creates a new stream around an open file.
     pub(crate) fn new(file: File) -> Self {
         Self {
@@ -37,7 +37,7 @@ impl<const N: usize> RREventStream<N> {
     }
 }
 
-impl<const N: usize> EventsStreamFacility for RREventStream<N> {
+impl<const N: usize> RawEventStreamFacility for RawEventStream<N> {
     /// Marks the stream as started.
     fn start(&mut self) -> FacilityResult<()> {
         self.started = true;
@@ -51,7 +51,7 @@ impl<const N: usize> EventsStreamFacility for RREventStream<N> {
     }
 
     /// Polls the next buffer if the stream has started.
-    fn poll_buffer(&mut self) -> FacilityResult<(&[u8], usize)> {
+    fn poll_buffer(&mut self) -> FacilityResult<(Vec<u8>, usize)> {
         if !self.started {
             return Err(FacilityError::Stream(StreamError::Disconnected));
         }
@@ -59,7 +59,7 @@ impl<const N: usize> EventsStreamFacility for RREventStream<N> {
     }
 
     /// Reads the next buffer from disk, blocking on I/O as needed.
-    fn wait_next_buffer(&mut self) -> FacilityResult<(&[u8], usize)> {
+    fn wait_next_buffer(&mut self) -> FacilityResult<(Vec<u8>, usize)> {
         if self.eof {
             return Err(FacilityError::Stream(StreamError::EndOfFile));
         }
@@ -69,7 +69,7 @@ impl<const N: usize> EventsStreamFacility for RREventStream<N> {
                 self.eof = true;
                 Err(FacilityError::Stream(StreamError::EndOfFile))
             }
-            Ok(bytes_read) => Ok((&self.buffer[..bytes_read], bytes_read)),
+            Ok(bytes_read) => Ok((self.buffer[..bytes_read].to_vec(), bytes_read)),
             Err(err) => {
                 self.eof = true;
                 Err(FacilityError::Stream(StreamError::IoError(err)))

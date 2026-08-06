@@ -1,3 +1,5 @@
+//! Recyclable buffers shared by event-stream implementations.
+
 use crossbeam::channel::Sender;
 use std::ops::Deref;
 

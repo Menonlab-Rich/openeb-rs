@@ -4,14 +4,13 @@
 //! events. It also maintains timing state so callers can seek, index, and
 //! optionally time-shift the output stream relative to the first observed event.
 
-use crossbeam::channel::{Receiver, Sender, bounded};
 use std::sync::Arc;
-use utilities::buffer::PooledBuffer;
 
 use crate::hal::dispatcher::{ErrorDispatcher, EventDispatcher};
-use crate::hal::errors::{DecoderProtocolViolation, SharedError};
+use crate::hal::errors::DecoderProtocolViolation;
 use crate::hal::facilities::{
-    BaseDecoderFacility, EventDecoderFacility, EventsStreamDecoderFacility,
+    RawDecoderFacility, DecoderErrorCallback, EventCDCallback, EventSubscriptionFacility,
+    EventExtTriggerCallback, RawEventStreamDecoderFacility, FacilityResult,
 };
 use crate::hal::types::{EventCD, EventExtTrigger};
 use log::warn;
@@ -67,18 +66,10 @@ pub struct Evt3Decoder {
     /// Previous high timestamp value, preserved for timing validation.
     prev_time_high: usize,
 
-    // Pool Channels
-    cd_pool_tx: Sender<Vec<EventCD>>,
-    cd_pool_rx: Receiver<Vec<EventCD>>,
-    ext_pool_tx: Sender<Vec<EventExtTrigger>>,
-    ext_pool_rx: Receiver<Vec<EventExtTrigger>>,
 }
 
 impl Default for Evt3Decoder {
     fn default() -> Self {
-        let (cd_pool_tx, cd_pool_rx) = bounded(32);
-        let (ext_pool_tx, ext_pool_rx) = bounded(32);
-
         Self {
             evt_dispatcher: Default::default(),
             err_dispatcher: Default::default(),
@@ -102,10 +93,6 @@ impl Default for Evt3Decoder {
             max_x: 640,
             max_y: 480,
             prev_time_high: Default::default(),
-            cd_pool_tx,
-            cd_pool_rx,
-            ext_pool_tx,
-            ext_pool_rx,
         }
     }
 }
@@ -445,52 +432,23 @@ impl Evt3Decoder {
     fn dispatch(&mut self) {
         // Process CD (Change Detection) buffer if it contains any events
         if !self.cd_buffer.is_empty() {
-            // Retrieve an empty buffer from the pool, or allocate if the pool is dry
-            let new_buffer = self
-                .cd_pool_rx
-                .try_recv()
-                .unwrap_or_else(|_| Vec::with_capacity(Self::BATCH_SIZE));
-
-            // Swap out the populated buffer with the empty one to avoid reallocation
-            let populated_buffer = std::mem::replace(&mut self.cd_buffer, new_buffer);
-
-            // Wrap the populated buffer so it can be returned to the pool after use
-            let pooled = PooledBuffer {
-                buffer: Some(populated_buffer),
-                return_channel: self.cd_pool_tx.clone(),
-            };
-
-            // Send the pooled buffer to the event dispatcher
-            self.add_event_buffer(Arc::new(pooled));
+            let populated_buffer = std::mem::take(&mut self.cd_buffer);
+            self.evt_dispatcher.send_cd(&populated_buffer);
         }
 
         // Process external trigger buffer if it contains any events
         if !self.ext_trigger_buffer.is_empty() {
-            // Retrieve an empty buffer from the external trigger pool, or allocate if dry
-            let new_buffer = self
-                .ext_pool_rx
-                .try_recv()
-                .unwrap_or_else(|_| Vec::with_capacity(Self::BATCH_SIZE));
-
-            // Swap out the populated buffer with the empty one to avoid reallocation
-            let populated_buffer = std::mem::replace(&mut self.ext_trigger_buffer, new_buffer);
-
-            // Wrap the populated buffer so it can be returned to the pool after use
-            let pooled = PooledBuffer {
-                buffer: Some(populated_buffer),
-                return_channel: self.ext_pool_tx.clone(),
-            };
-
-            // Send the pooled buffer to the external event dispatcher
-            self.evt_dispatcher.send_ext(Arc::new(pooled));
+            let populated_buffer = std::mem::take(&mut self.ext_trigger_buffer);
+            self.evt_dispatcher.send_ext(&populated_buffer);
         }
     }
 }
 
-impl BaseDecoderFacility for Evt3Decoder {
+impl RawDecoderFacility for Evt3Decoder {
     /// Subscribes to decoder protocol violation errors.
-    fn subscribe_to_protocol_violation(&mut self) -> Receiver<SharedError> {
-        self.err_dispatcher.subscribe::<DecoderProtocolViolation>()
+    fn subscribe_to_protocol_violation(&mut self, callback: DecoderErrorCallback) -> FacilityResult<()> {
+        self.err_dispatcher.subscribe::<DecoderProtocolViolation>(callback);
+        Ok(())
     }
 
     /// Returns the EVT3 raw word size.
@@ -499,7 +457,7 @@ impl BaseDecoderFacility for Evt3Decoder {
     }
 }
 
-impl EventsStreamDecoderFacility for Evt3Decoder {
+impl RawEventStreamDecoderFacility for Evt3Decoder {
     /// Decodes a raw byte buffer into typed EVT3 events.
     ///
     /// Buffer boundaries may split 16-bit words, so the decoder preserves one
@@ -577,20 +535,17 @@ impl EventsStreamDecoderFacility for Evt3Decoder {
     }
 }
 
-impl EventDecoderFacility for Evt3Decoder {
+impl EventSubscriptionFacility for Evt3Decoder {
     /// Subscribes to decoded CD event batches.
-    fn subscribe_to_cd_events(&mut self) -> Receiver<Arc<PooledBuffer<EventCD>>> {
-        self.evt_dispatcher.subscribe_cd(2048)
+    fn subscribe_to_cd_events(&mut self, callback: EventCDCallback) -> FacilityResult<()> {
+        self.evt_dispatcher.subscribe_cd(callback);
+        Ok(())
     }
 
     /// Subscribes to decoded external-trigger batches.
-    fn subscribe_to_ext_events(&mut self) -> Receiver<Arc<PooledBuffer<EventExtTrigger>>> {
-        self.evt_dispatcher.subscribe_ext(2048)
-    }
-
-    /// Adds a decoded CD event buffer to the dispatcher.
-    fn add_event_buffer(&mut self, range: Arc<PooledBuffer<EventCD>>) {
-        self.evt_dispatcher.send_cd(range);
+    fn subscribe_to_ext_events(&mut self, callback: EventExtTriggerCallback) -> FacilityResult<()> {
+        self.evt_dispatcher.subscribe_ext(callback);
+        Ok(())
     }
 }
 

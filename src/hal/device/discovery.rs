@@ -1,7 +1,7 @@
 #[cfg_attr(feature = "plugins", derive(abi_stable::StableAbi))]
 #[cfg_attr(feature = "plugins", repr(C))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-/// Transport used to connect a camera plugin to a host.
+/// Transport used to connect a camera plugin to the host layer.
 pub enum ConnectionType {
     /// MIPI camera connection.
     Mipi,
@@ -11,6 +11,8 @@ pub enum ConnectionType {
     Network,
     /// Vendor-specific connection.
     Proprietary,
+    /// Software only device
+    Software,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +106,7 @@ impl Default for PluginRegistry {
 
 #[cfg(feature = "plugins")]
 impl PluginRegistry {
+    /// Creates an empty plugin registry.
     pub fn new() -> Self {
         Self {
             modules: Vec::new(),
@@ -121,6 +124,10 @@ impl PluginRegistry {
         loaded
     }
 
+    /// Loads compatible plugin libraries directly from `directory`.
+    ///
+    /// Returns the number of libraries successfully loaded. Missing
+    /// directories and individual load failures are ignored.
     pub fn load_directory(&mut self, directory: &Path) -> usize {
         let Ok(entries) = fs::read_dir(directory) else {
             return 0;
@@ -133,6 +140,7 @@ impl PluginRegistry {
             .count()
     }
 
+    /// Loads one plugin library and registers its discovery interface.
     pub fn load_file(&mut self, path: &Path) -> Result<(), abi_stable::library::LibraryError> {
         let module = DevicePluginModuleRef::load_from_file(path)?;
         let discovery = (module
@@ -142,6 +150,7 @@ impl PluginRegistry {
         Ok(())
     }
 
+    /// Discovers cameras exposed by all loaded plugins.
     pub fn list_devices(&self) -> Vec<CameraDescription> {
         self.modules
             .iter()
@@ -159,6 +168,7 @@ impl PluginRegistry {
             .collect()
     }
 
+    /// Opens the plugin device matching `serial`.
     pub fn open_device(&self, serial: &str) -> Result<super::plugin::DevicePluginBox, String> {
         for (_, discovery) in &self.modules {
             match discovery.open_device(serial.into()) {
@@ -167,6 +177,88 @@ impl PluginRegistry {
             }
         }
         Err(format!("no plugin device found for serial {serial}"))
+    }
+
+    /// Retrieves and parses the creation schema for a discovered device.
+    pub fn configuration_schema(
+        &self,
+        serial: &str,
+    ) -> Result<super::configuration::PluginConfigurationSchema, String> {
+        for (_, discovery) in &self.modules {
+            if discovery
+                .discover()
+                .iter()
+                .any(|description| description.serial.as_str() == serial)
+            {
+                let source = discovery.configuration_schema();
+                return if source.is_empty() {
+                    Ok(super::configuration::PluginConfigurationSchema::empty())
+                } else {
+                    super::configuration::PluginConfigurationSchema::parse(source.as_str())
+                        .map_err(|error| error.to_string())
+                };
+            }
+        }
+        Err(format!("no plugin device found for serial {serial}"))
+    }
+
+    /// Creates an all-optional configuration form for a discovered device.
+    pub fn new_configuration(
+        &self,
+        serial: &str,
+    ) -> Result<super::plugin::PluginConfiguration, String> {
+        Ok(self
+            .configuration_schema(serial)?
+            .new_configuration(serial))
+    }
+
+    /// Opens a discovered device with a host-layer-populated configuration.
+    pub fn open_device_with_configuration(
+        &self,
+        configuration: super::plugin::PluginConfiguration,
+    ) -> Result<super::plugin::DevicePluginBox, String> {
+        let schema = self.configuration_schema(configuration.serial.as_str())?;
+        schema
+            .validate(&configuration)
+            .map_err(|error| error.to_string())?;
+        for (_, discovery) in &self.modules {
+            if discovery
+                .discover()
+                .iter()
+                .any(|description| description.serial == configuration.serial)
+            {
+                match discovery.open_device_with_configuration(configuration.clone()) {
+                    abi_stable::std_types::RResult::ROk(device) => return Ok(device),
+                    abi_stable::std_types::RResult::RErr(error) => {
+                        return Err(error.to_string());
+                    }
+                }
+            }
+        }
+        Err(format!(
+            "no plugin device found for serial {}",
+            configuration.serial
+        ))
+    }
+
+    /// Opens a configured plugin through the native host-layer device adapter.
+    pub fn open_native_device_with_configuration(
+        &self,
+        configuration: super::plugin::PluginConfiguration,
+    ) -> Result<super::device::HostPluginDevice, String> {
+        self.open_device_with_configuration(configuration).map(Into::into)
+    }
+
+    /// Opens a plugin device through the ordinary host-layer
+    /// [`super::device::Device`] API.
+    ///
+    /// The conversion is explicit and ABI-safe: the adapter only exposes
+    /// facility handles for which the host layer has a matching native adapter.
+    pub fn open_native_device(
+        &self,
+        serial: &str,
+    ) -> Result<super::device::HostPluginDevice, String> {
+        self.open_device(serial).map(Into::into)
     }
 }
 

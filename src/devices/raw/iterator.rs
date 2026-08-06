@@ -16,12 +16,11 @@ use std::{
 use crossbeam::channel::Receiver;
 use openevt_core::hal::{
     errors::StreamError,
-    facilities::{EventsStreamDecoderFacility, EventsStreamFacility, FacilityError},
+    facilities::{RawEventStreamDecoderFacility, RawEventStreamFacility, FacilityError},
     types::EventCD,
 };
-use utilities::buffer::PooledBuffer;
 
-use crate::{raw::stream::RREventStream, types::DeviceFileError};
+use crate::{raw::stream::RawEventStream, types::DeviceFileError};
 
 /// Type-state marker for an iterator that loads raw data synchronously.
 pub struct IterSync;
@@ -32,10 +31,10 @@ pub struct IterUnconfigured;
 
 /// Consumes decoded CD events in batch or time-window form.
 pub struct EventWindowIterator<const BUFFER_SIZE: usize, State = IterUnconfigured> {
-    stream_handle: Arc<RwLock<dyn EventsStreamFacility + Send + 'static>>,
-    decoder_handle: Arc<RwLock<dyn EventsStreamDecoderFacility + Send + 'static>>,
-    receiver: Receiver<Arc<PooledBuffer<EventCD>>>,
-    // Holds leftover events extracted from PooledBuffers that haven't been consumed yet
+    stream_handle: Arc<RwLock<dyn RawEventStreamFacility + Send + 'static>>,
+    decoder_handle: Arc<RwLock<dyn RawEventStreamDecoderFacility + Send + 'static>>,
+    receiver: Receiver<Vec<EventCD>>,
+    // Holds leftover events from decoded batches that have not been consumed yet
     internal_buffer: std::collections::VecDeque<EventCD>,
     // Tracks the current temporal baseline for slicing fixed delta-t windows
     current_timestamp: Option<u64>,
@@ -48,10 +47,10 @@ impl<const BUFFER_SIZE: usize> EventWindowIterator<BUFFER_SIZE, IterUnconfigured
     ///
     /// Call `into_sync` or `into_async` before using batch/window methods.
     pub fn new(
-        receiver: Receiver<Arc<PooledBuffer<EventCD>>>,
+        receiver: Receiver<Vec<EventCD>>,
         shape: (u32, u32),
-        stream_handle: Arc<RwLock<dyn EventsStreamFacility + Send + 'static>>,
-        decoder_handle: Arc<RwLock<dyn EventsStreamDecoderFacility + Send + 'static>>,
+        stream_handle: Arc<RwLock<dyn RawEventStreamFacility + Send + 'static>>,
+        decoder_handle: Arc<RwLock<dyn RawEventStreamDecoderFacility + Send + 'static>>,
     ) -> Self {
         Self {
             stream_handle,
@@ -91,6 +90,7 @@ impl<const BUFFER_SIZE: usize> EventWindowIterator<BUFFER_SIZE, IterUnconfigured
     }
 }
 
+/// Supplies decoded events to an [`EventWindowIterator`] when its buffer runs dry.
 pub trait BufferReplenisher {
     /// Ensures there are decoded events available in the internal buffer.
     fn replenish_buffer(&mut self) -> Result<(), DeviceFileError>;
@@ -127,9 +127,8 @@ impl<const BUFFER_SIZE: usize, State> EventWindowIterator<BUFFER_SIZE, State> {
 
     /// Internal logic for reading channel data into `internal_buffer`.
     fn drain_channel_once(&mut self) {
-        if let Ok(pooled_buffer) = self.receiver.recv() {
-            self.internal_buffer
-                .extend(pooled_buffer.as_ref().iter().cloned());
+        if let Ok(events) = self.receiver.recv() {
+            self.internal_buffer.extend(events);
         }
     }
 
@@ -139,9 +138,8 @@ impl<const BUFFER_SIZE: usize, State> EventWindowIterator<BUFFER_SIZE, State> {
     /// a single raw buffer can decode into several pooled event batches.
     fn try_drain_channel_once(&mut self) -> bool {
         match self.receiver.try_recv() {
-            Ok(pooled_buffer) => {
-                self.internal_buffer
-                    .extend(pooled_buffer.as_ref().iter().cloned());
+            Ok(events) => {
+                self.internal_buffer.extend(events);
                 true
             }
             Err(_) => false,
@@ -282,9 +280,9 @@ impl<const BUFFER_SIZE: usize> EventWindowIterator<BUFFER_SIZE, IterSync> {
             .try_write()
             .map_err(|_| DeviceFileError::LockError)?;
 
-        let stream = crate::facility_downcast_mut!(stream_facility, RREventStream<BUFFER_SIZE>)?;
+        let stream = crate::facility_downcast_mut!(stream_facility, RawEventStream<BUFFER_SIZE>)?;
         let (buffer, _) = stream.poll_buffer()?;
-        decoder_facility.decode(buffer)?;
+        decoder_facility.decode(&buffer)?;
         Ok(())
     }
 }

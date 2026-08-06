@@ -16,8 +16,9 @@ use std::sync::Arc;
 
 /// File-backed ROI facility.
 ///
-/// TODO: confirm whether raw files are expected to preserve ROI state or
-/// expose a writable placeholder implementation.
+/// Raw files do not contain mutable camera ROI state. This implementation keeps
+/// ROI values as local reader state so clients can use the common facility API
+/// while processing a file.
 #[derive(Clone)]
 pub(crate) struct RawReaderROI {
     enabled: bool,
@@ -59,8 +60,8 @@ impl ROIFacility for RawReaderROI {
         self.roi_
     }
 
-    fn rois(&self) -> Option<&[Region]> {
-        self.rois_.as_deref()
+    fn rois(&self) -> Option<Vec<Region>> {
+        self.rois_.clone()
     }
 }
 

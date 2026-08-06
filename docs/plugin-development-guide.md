@@ -1,27 +1,35 @@
 # Developing an OpenEVT Device Plugin
 
 This guide explains how to create a Rust device plugin that can be discovered
-and loaded by an OpenEVT host. It is written for developers who know basic Rust
-but may not have written a dynamic library or an FFI (foreign-function
-interface) before.
+and loaded by the OpenEVT host layer. It is written for developers who know
+basic Rust but may not have written a dynamic library or an FFI
+(foreign-function interface) before.
 
 The guide uses the plugin API in `openevt::hal::device::plugin` and the loading
 API in `openevt::hal::device::discovery::PluginRegistry`.
 
 ## What a Plugin Does
 
-An OpenEVT plugin is a dynamic library that connects a host application to a
-camera or another event source. The host and plugin communicate through a small
-ABI-safe interface:
+An OpenEVT plugin is a dynamic library that connects the OpenEVT host layer to
+a camera or another event source. The host layer is the private, library-controlled
+side of the ABI boundary. Applications built with OpenEVT interact with the
+host layer through its public Rust API; they do not implement the ABI boundary.
 
-1. The host loads the library.
+The flow is:
+
+1. The host layer loads the plugin library.
 2. The library provides a root module with its name and a discovery factory.
-3. The discovery object lists available devices.
-4. The host opens one device by its serial string.
-5. The device reports its facilities and optionally sends event batches.
+3. The discovery object lists available devices and exposes a creation schema.
+4. The host layer exposes the devices and schema to the application.
+5. The application decides how to collect values, such as through a GUI or
+   terminal.
+6. The application passes those values to the host layer using the same public API
+   regardless of how they were collected.
+7. The host layer validates the configuration and sends it to the plugin.
+8. The device reports its facilities and optionally sends event batches.
 
-The host does not need to know how the camera is connected. A plugin can use a
-USB SDK, a network protocol, a file reader, or a simulator internally.
+The application does not need to know how the camera is connected. A plugin
+can use a USB SDK, a network protocol, a file reader, or a simulator internally.
 
 The repository includes a complete raw-file adapter in
 [`src/devices/raw/plugin.rs`](../src/devices/raw/plugin.rs). It is the best
@@ -52,7 +60,7 @@ Use the ABI types in public plugin interfaces. Do not replace them with native
 
 The plugin may use ordinary Rust types internally. For example, it can keep a
 `crossbeam::Receiver` in its device struct and convert each received batch to
-an `RSlice` only while invoking the host callback.
+an `RSlice` only while invoking the host-layer callback.
 
 ## Project Setup
 
@@ -67,7 +75,7 @@ The root crate already has the required library types and can produce a
 Enable the plugin feature:
 
 ```sh
-cargo build --release --features devices,plugins
+cargo build --release --features devices,plugins,bundled-plugins
 ```
 
 The relevant feature configuration is:
@@ -75,6 +83,7 @@ The relevant feature configuration is:
 ```toml
 [features]
 plugins = ["dep:abi_stable"]
+bundled-plugins = ["plugins"]
 
 [dependencies]
 abi_stable = { version = "0.11.3", optional = true }
@@ -83,7 +92,7 @@ abi_stable = { version = "0.11.3", optional = true }
 crate-type = ["rlib", "cdylib"]
 ```
 
-The `cdylib` output is the dynamic library that a host loads. The `rlib`
+The `cdylib` output is the dynamic library that the host layer loads. The `rlib`
 output remains useful for unit tests and normal Rust dependencies.
 
 ### Layout B: A Separate Plugin Crate
@@ -107,8 +116,8 @@ crate-type = ["cdylib"]
 ```
 
 In practice, build the plugin against the same OpenEVT plugin API version as
-the host. Keep `abi_stable` versions aligned as well. The root module performs
-ABI compatibility checks when the host loads the library, but avoiding version
+the host layer. Keep `abi_stable` versions aligned as well. The root module performs
+ABI compatibility checks when the host layer loads the library, but avoiding version
 drift makes failures easier to diagnose.
 
 ## The Three Pieces Every Plugin Needs
@@ -158,13 +167,15 @@ impl ExampleCamera {
 A useful pattern is to keep connection errors as ordinary `Result` values
 inside the implementation and convert them at the ABI boundary. This keeps
 the internal code idiomatic and makes every exported method return the type the
-host expects.
+the host layer expects.
 
 ## Step 2: Report Facilities
 
 A facility is a capability, such as geometry, ROI control, or an event stream.
-The plugin API uses `PluginFacilityType` as a stable key and
-`PluginFacility` as an opaque descriptor.
+The plugin API uses `PluginFacilityType` as a stable key. The legacy
+`PluginFacility` value is only a capability descriptor. For callable
+capabilities, implement the corresponding ABI-safe facility trait and return
+its type-erased `PluginFacilityHandle` from `get_facility_handle`.
 
 The ABI knows the complete native facility key set, including:
 
@@ -187,8 +198,8 @@ impl DevicePlugin for ExampleCamera {
         vec![
             PluginFacilityType::Geometry,
             PluginFacilityType::HardwareIdentification,
-            PluginFacilityType::EventsStream,
-            PluginFacilityType::EventDecoder,
+            PluginFacilityType::RawEventStream,
+            PluginFacilityType::EventSubscription,
         ]
         .into()
     }
@@ -216,14 +227,85 @@ impl DevicePlugin for ExampleCamera {
 The `#` lines are hidden by Rust documentation renderers to keep the example
 focused; in a source file, provide all required trait methods normally.
 
-`PluginFacility` currently identifies a capability but does not transport a
-native Rust trait object. Native facilities use Rust-only concepts such as
-`Any`, crossbeam channels, locks, and borrowed standard slices. Those types
-must stay inside the plugin. If an operation is needed across the boundary,
-add a separately versioned ABI-safe trait or method rather than exposing the
-native facility trait directly.
+The plugin facility traits mirror the native facility concepts without
+transporting native Rust trait objects. For example,
+`PluginRawEventStreamDecoderFacility` exposes `decode` and timestamp operations,
+and `PluginEventSubscriptionFacility` uses `EventBatchSinkBox` in place of native
+channels. Native `Any`, crossbeam channels, locks, and borrowed standard
+slices must stay inside the plugin. Use the ABI-safe equivalents
+(`RSlice`, `RVec`, `RResult`, and callback traits) at the boundary.
 
-## Step 3: Implement the Device Life Cycle
+The descriptor accessor remains available while existing plugins migrate:
+
+```rust
+fn get_facility_handle(
+    &self,
+    facility_type: PluginFacilityType,
+) -> ROption<PluginFacilityHandle> {
+    match facility_type {
+        PluginFacilityType::Geometry => Some(PluginFacilityHandle::Geometry(
+            PluginGeometryFacility_TO::from_value(
+                MyGeometryFacility { width: 640, height: 480 },
+                TD_Opaque,
+            ),
+        )).into(),
+        _ => ROption::RNone,
+    }
+}
+```
+
+The host layer calls the returned type-erased handle through its generated ABI
+vtable; the concrete implementation and all native state remain in the
+plugin. Facilities not yet represented by a plugin trait should not be
+treated as callable merely because their descriptor is advertised.
+
+Optional device behavior is also represented as facilities. Plugins can expose
+`PluginIndexFacility` for `t_min`/`t_max`, `PluginSeekFacility` for timestamp
+seeking, and `PluginExternalTriggerSeekFacility` for seeking to the next
+external trigger. A device that does not support one of these capabilities
+simply omits its facility handle; it does not need a placeholder method or a
+`todo!()` implementation.
+
+## Step 3: Declare and Validate Creation Parameters
+
+Device resources belong to the plugin, so the host layer does not pass an open file
+handle, socket, or SDK object across the ABI. Instead, discovery returns a
+versioned TOML schema. The host layer exposes that schema to the application, and the
+application chooses how to collect the values. A GUI application can use
+`kind = "file"` to open a file picker; a terminal application can read a path
+from an argument.
+
+For example, a raw-file plugin can expose:
+
+```toml
+version = 1
+
+[[parameters]]
+name = "input_file"
+label = "Input event file"
+kind = "file"
+required = true
+description = "An EVT3 event file to replay."
+extensions = ["raw", "evt3"]
+```
+
+The ABI configuration object is deliberately less opinionated than the
+schema. Every field is represented as `ROption<RString>`, including required
+fields, so an in-progress application form is representable. The host layer provides
+`PluginRegistry::configuration_schema` to expose the parsed plugin schema,
+`PluginConfigurationSchema::new_configuration` to create the configuration
+object, and `PluginConfigurationSchema::validate` to validate it before
+opening the device.
+
+The plugin must validate again inside `open_device_with_configuration` before
+opening its resource. This keeps the plugin authoritative and ensures that
+malformed callers cannot cause it to acquire a resource with an incomplete
+configuration. The plugin owns the resource and its lifetime.
+
+The legacy serial-only `open_device` method remains available during
+migration, but new plugins should implement the configuration-aware method.
+
+## Step 4: Implement the Device Life Cycle
 The remaining `DevicePlugin` methods describe the device and drive event
 delivery:
 
@@ -238,7 +320,7 @@ impl DevicePlugin for ExampleCamera {
     }
 
     fn get_facilities(&self) -> RVec<PluginFacilityType> {
-        vec![PluginFacilityType::EventDecoder].into()
+        vec![PluginFacilityType::EventSubscription].into()
     }
 
     fn get_facility(
@@ -274,7 +356,7 @@ impl DevicePlugin for ExampleCamera {
 ```
 
 ### Pull-Driven Event Delivery
-The current API is pull-driven. The host calls `load_batch`, and the plugin
+The current API is pull-driven. The host layer calls `load_batch`, and the plugin
 does the work synchronously. A plugin may use a background thread internally,
 but `load_batch` must still provide a clear synchronization point and should
 return an error if the device is not initialized.
@@ -295,7 +377,7 @@ pub trait EventBatchSink: Send + Sync {
 }
 ```
 
-The slice is valid only during the callback. If the host needs to retain the
+The slice is valid only during the callback. If the host layer needs to retain the
 events, it must copy them. The plugin must also ensure that its backing storage
 stays alive until the callback returns.
 
@@ -356,7 +438,7 @@ unique within the plugin. For a file plugin, the path can be the serial. For a
 camera SDK, use the camera’s hardware serial number.
 
 If the serial is unknown or opening fails, return `RResult::RErr` with a useful
-message. The host’s registry tries each loaded discovery plugin until one can
+message. The host layer’s registry tries each loaded discovery plugin until one can
 open the requested serial.
 
 ## Step 6: Export the Root Module
@@ -410,7 +492,7 @@ On common platforms, the resulting library is under `target/release/`:
 - macOS: `libexample_camera.dylib`
 - Windows: `example_camera.dll`
 
-The host searches:
+The host layer searches:
 
 1. directories listed in `OPENEVT_PLUGIN_PATH`;
 2. `/usr/lib/openevt/plugins`;
@@ -423,7 +505,7 @@ temporary development setup can use a directory containing the built library:
 OPENEVT_PLUGIN_PATH="$PWD/target/release" cargo run --example plugin-host
 ```
 
-The host loads plugins through `PluginRegistry`:
+The host layer loads plugins through `PluginRegistry`:
 
 ```rust,no_run
 use openevt::hal::device::discovery::PluginRegistry;
@@ -502,12 +584,12 @@ An `rlib` is a Rust library, not a loadable plugin for the registry. Set
 ### Loading the Wrong File
 
 `PluginRegistry::load_directory` skips files whose extension is not `so`,
-`dll`, or `dylib`. Check that the library was built for the host operating
+`dll`, or `dylib`. Check that the library was built for the host layer’s operating
 system and CPU architecture.
 
 ### ABI or Version Mismatch
 
-Build the host and plugin against compatible OpenEVT and `abi_stable` versions.
+Build the host layer and plugin against compatible OpenEVT and `abi_stable` versions.
 If loading fails, first rebuild both from clean, matching dependency locks and
 check the exact library path being loaded.
 
@@ -531,4 +613,3 @@ For a first plugin, implement in this order:
 
 This order gives you a loadable, discoverable plugin early, before adding the
 more complicated device I/O and event lifetime behavior.
-

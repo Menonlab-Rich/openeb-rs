@@ -9,16 +9,18 @@ adapter, not a second decoder.
 Build the library with both device and plugin support:
 
 ```sh
-cargo build --release --features devices,plugins
+cargo build --release --features devices,plugins,bundled-plugins
 ```
 
 The resulting `openevt` cdylib exports the `openevt_device_plugin` root module.
-Place it in one of the standard plugin directories, or point the host at its
-directory with `OPENEVT_PLUGIN_PATH`.
+Place it in one of the standard plugin directories, or configure the host
+plugin search path with `OPENEVT_PLUGIN_PATH`.
 
 To make raw files discoverable, set `OPENEVT_RAW_FILES` to a platform-separated
-list of EVT3 paths. The discovery serial is the path, so the host can pass that
-serial to `PluginRegistry::open_device`.
+list of EVT3 paths. The discovery serial is the path. An application can query
+the host layer for the schema, collect a file path through any UI it chooses,
+and pass the resulting configuration to the host layer’s
+`PluginRegistry::open_device_with_configuration` method.
 
 ```rust,no_run
 use openevt::hal::device::discovery::PluginRegistry;
@@ -28,6 +30,12 @@ registry.load_default_paths();
 for camera in registry.list_devices() {
     println!("{}", camera.plugin_info.serial);
 }
+
+let serial = "path/to/events.raw";
+let schema = registry.configuration_schema(serial)?;
+let mut configuration = schema.new_configuration(serial);
+configuration.values[0].value = Some(serial.into()).into();
+let _device = registry.open_device_with_configuration(configuration)?;
 ```
 
 ## Event channel behavior
@@ -46,7 +54,7 @@ callback. Consumers that need to queue events must copy them. This is the same
 ownership rule as a borrowed native facility buffer, and avoids leaking a Rust
 allocator or channel implementation into third-party plugins.
 
-Both event callbacks use the same sink object. A host may implement one method
+Both event callbacks use the same sink object. The application may implement one method
 and ignore the other when it only needs CD events. Calling `load_batch` before
 starting a stream preserves the native `NotInitialized`/stream error behavior.
 

@@ -1,16 +1,21 @@
+//! File-backed raw event device implementation.
+//!
+//! This module parses raw-file headers, exposes stream and decoder facilities,
+//! and provides batch/window iteration over decoded CD events.
+
 mod decoder;
 mod device;
 mod facilities;
 mod index;
 mod iterator;
-#[cfg(feature = "plugins")]
+#[cfg(feature = "bundled-plugins")]
 pub mod plugin;
 mod reader;
 mod stream;
 
-pub use decoder::RREventStreamDecoder;
+pub use decoder::RawEventStreamDecoder;
 pub use iterator::*;
-#[cfg(feature = "plugins")]
+#[cfg(feature = "bundled-plugins")]
 pub use plugin::RawFilePlugin;
 pub(crate) use reader::RawFileReader;
 

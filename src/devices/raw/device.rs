@@ -1,7 +1,7 @@
 use crate::header::Header;
-use crate::raw::decoder::RREventStreamDecoder;
+use crate::raw::decoder::RawEventStreamDecoder;
 use crate::raw::facilities::{RawReaderGeometry, RawReaderHWIdentification, RawReaderROI};
-use crate::raw::stream::RREventStream;
+use crate::raw::stream::RawEventStream;
 use crate::types::{DeviceFileError, FileFormat};
 use openevt_core::hal::device::device::Device;
 use openevt_core::hal::facilities::{FacilityHandle, FacilityType};
@@ -100,20 +100,20 @@ impl<const N: usize> RawFileHandler<N> {
             pack_facility!(mut ROIFacility, roi),
         );
 
-        let stream = RREventStream::<N>::new(file);
+        let stream = RawEventStream::<N>::new(file);
         device.register_facility(
-            FacilityType::EventsStreamFacility,
-            pack_facility!(mut EventsStreamFacility, stream),
+            FacilityType::RawEventStreamFacility,
+            pack_facility!(mut RawEventStreamFacility, stream),
         );
 
-        let decoder = RREventStreamDecoder::new(&header, true);
+        let decoder = RawEventStreamDecoder::new(&header, true);
         device.register_facility(
-            FacilityType::EventsStreamDecoderFacility,
-            pack_facility!(mut EventsStreamDecoderFacility, decoder.clone()),
+            FacilityType::RawEventStreamDecoderFacility,
+            pack_facility!(mut RawEventStreamDecoderFacility, decoder.clone()),
         );
         device.register_facility(
-            FacilityType::EventDecoderFacility,
-            pack_facility!(mut EventDecoderFacility, decoder),
+            FacilityType::EventSubscriptionFacility,
+            pack_facility!(mut EventSubscriptionFacility, decoder),
         );
 
         Ok(device)
@@ -123,6 +123,7 @@ impl<const N: usize> RawFileHandler<N> {
     /// facilities.
     ///
     /// If opening or parsing fails, the existing handler remains unchanged.
+    /// Replaces the current file with `path` and rebuilds its facilities.
     pub fn try_open(&mut self, path: &str) -> Result<(), DeviceFileError> {
         let mut file = std::fs::File::open(path)?;
 
@@ -151,10 +152,10 @@ impl<const N: usize> RawFileHandler<N> {
             pack_facility!(ro HWIdentificationFacility, hw_identification),
         );
 
-        let stream = RREventStream::<N>::new(file);
+        let stream = RawEventStream::<N>::new(file);
         self.register_facility(
-            FacilityType::EventsStreamFacility,
-            pack_facility!(mut EventsStreamFacility, stream),
+            FacilityType::RawEventStreamFacility,
+            pack_facility!(mut RawEventStreamFacility, stream),
         );
 
         let roi = RawReaderROI::default();
@@ -163,15 +164,15 @@ impl<const N: usize> RawFileHandler<N> {
             pack_facility!(mut ROIFacility, roi),
         );
 
-        let decoder = RREventStreamDecoder::new(&header, true);
+        let decoder = RawEventStreamDecoder::new(&header, true);
 
         self.register_facility(
-            FacilityType::EventsStreamDecoderFacility,
-            pack_facility!(mut EventsStreamDecoderFacility, decoder.clone()),
+            FacilityType::RawEventStreamDecoderFacility,
+            pack_facility!(mut RawEventStreamDecoderFacility, decoder.clone()),
         );
         self.register_facility(
-            FacilityType::EventDecoderFacility,
-            pack_facility!(mut EventDecoderFacility, decoder),
+            FacilityType::EventSubscriptionFacility,
+            pack_facility!(mut EventSubscriptionFacility, decoder),
         );
 
         Ok(())

@@ -1,3 +1,10 @@
+//! ABI-stable interfaces for converting event streams into image frames.
+//!
+//! A frame-generator plugin receives decoded CD events, maintains whatever
+//! temporal state its modality requires, and renders into a caller-owned RGBA
+//! buffer. The module is intentionally small so generators can be implemented
+//! in separate dynamic libraries.
+
 use abi_stable::{
     StableAbi,
     library::RootModule,
@@ -9,14 +16,18 @@ use abi_stable::{
 use crate::hal::types::EventCD;
 
 /// Frame dimensions and pixel format metadata.
+/// An RGB color returned by a frame-generator colormap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
 #[repr(C)]
 pub struct FrameSpec {
+    /// Frame width in pixels.
     pub width: usize,
+    /// Frame height in pixels.
     pub height: usize,
 }
 
 impl FrameSpec {
+    /// Returns the number of bytes required for an RGBA frame.
     pub fn rgba_buffer_size(&self) -> usize {
         self.width * self.height * 4
     }
@@ -25,8 +36,11 @@ impl FrameSpec {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
 #[repr(C)]
 pub struct Color {
+    /// Red channel value.
     r: u8,
+    /// Green channel value.
     g: u8,
+    /// Blue channel value.
     b: u8,
 }
 

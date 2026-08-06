@@ -20,13 +20,16 @@ extern crate self as utilities;
 macro_rules! property {
     (ro $name:ident : $ty:ty ; $($rest:tt)*) => {
         paste::paste! {
+            #[doc = "Returns the current facility property."]
             fn [<get_ $name>](&self) -> FacilityResult<$ty>;
         }
         property!($($rest)*);
     };
     ($name:ident : $ty:ty ; $($rest:tt)*) => {
         paste::paste! {
+            #[doc = "Returns the current facility property."]
             fn [<get_ $name>](&self) -> FacilityResult<$ty>;
+            #[doc = "Updates the facility property."]
             fn [<set_ $name>](&mut self, value: $ty) -> FacilityResult<()>;
         }
         property!($($rest)*);
@@ -47,6 +50,7 @@ macro_rules! pack_facility {
 
 /// Recyclable buffers used by event decoders and dispatchers.
 pub mod buffer;
+/// ABI-stable event-to-frame generation interfaces.
 #[cfg(feature = "framegen")]
 pub mod framegen;
 /// Shared HAL abstractions.
@@ -54,9 +58,11 @@ pub mod hal;
 
 #[cfg(feature = "devices")]
 #[path = "devices/device_macros.rs"]
+/// Macros used to implement common device plumbing.
 pub mod device_macros;
 #[cfg(feature = "devices")]
 #[path = "devices/header.rs"]
+/// Raw event-file header parsing and metadata conversion.
 pub mod header;
 #[cfg(feature = "devices")]
 #[path = "devices/raw/mod.rs"]
@@ -66,9 +72,10 @@ mod raw;
 pub mod types;
 
 #[cfg(feature = "python")]
+/// Python bindings for the device and event APIs.
 pub mod python;
 
-#[cfg(all(feature = "devices", feature = "plugins"))]
+#[cfg(all(feature = "devices", feature = "bundled-plugins"))]
 pub use raw::RawFilePlugin;
 #[cfg(feature = "devices")]
-pub use raw::{BufferReplenisher, EventWindowIterator, IterAsync, IterSync, RREventStreamDecoder};
+pub use raw::{BufferReplenisher, EventWindowIterator, IterAsync, IterSync, RawEventStreamDecoder};

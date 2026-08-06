@@ -10,28 +10,27 @@
 //! - exposing the parsed file time range
 
 use crate::EventWindowIterator;
-use crate::raw::decoder::RREventStreamDecoder;
+use crate::raw::decoder::RawEventStreamDecoder;
 use crate::raw::device::RawFileHandler;
-use crate::raw::stream::RREventStream;
+use crate::raw::stream::RawEventStream;
 use crate::raw::{IterUnconfigured, index};
 use crate::types::{DeviceFileError, FileIndex};
 use crossbeam::channel::Receiver;
 use num_traits::ToPrimitive;
 use openevt_core::hal::device::device::Device;
 use openevt_core::hal::facilities::{
-    EventDecoderFacilityHandle, EventsStreamDecoderFacilityHandle, EventsStreamFacility,
-    EventsStreamFacilityHandle, FacilityError, FacilityType, ROIFacilityHandle,
+    EventSubscriptionFacilityHandle, RawEventStreamDecoderFacilityHandle, RawEventStreamFacility,
+    RawEventStreamFacilityHandle, FacilityError, FacilityType, ROIFacilityHandle,
 };
 use openevt_core::hal::types::{EventCD, EventExtTrigger};
 use std::sync::Arc;
-use utilities::buffer::PooledBuffer;
 
 /// Reads and decodes an event-camera raw file.
 pub struct RawFileReader<const BUFFER_SIZE: usize> {
     _device: RawFileHandler<BUFFER_SIZE>,
-    stream_handle: Option<EventsStreamFacilityHandle>,
-    decoder_handle: Option<EventsStreamDecoderFacilityHandle>,
-    event_decoder_handle: Option<EventDecoderFacilityHandle>,
+    stream_handle: Option<RawEventStreamFacilityHandle>,
+    decoder_handle: Option<RawEventStreamDecoderFacilityHandle>,
+    event_decoder_handle: Option<EventSubscriptionFacilityHandle>,
     index: Option<Arc<FileIndex>>,
     initialized: bool,
 }
@@ -74,29 +73,29 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
             false => None,
         };
 
-        let stream_handle: Option<EventsStreamFacilityHandle> = Some(
+        let stream_handle: Option<RawEventStreamFacilityHandle> = Some(
             device
-                .get_facility(FacilityType::EventsStreamFacility)
+        .get_facility(FacilityType::RawEventStreamFacility)
                 .ok_or(DeviceFileError::UnsupportedFacility(
-                    "EventsStreamFacility".to_string(),
+                    "RawEventStreamFacility".to_string(),
                 ))?
                 .try_into()?,
         );
 
-        let decoder_handle: Option<EventsStreamDecoderFacilityHandle> = Some(
+        let decoder_handle: Option<RawEventStreamDecoderFacilityHandle> = Some(
             device
-                .get_facility(FacilityType::EventsStreamDecoderFacility)
+        .get_facility(FacilityType::RawEventStreamDecoderFacility)
                 .ok_or(DeviceFileError::UnsupportedFacility(
-                    "EventsStreamDecoderFacility".to_string(),
+                    "RawEventStreamDecoderFacility".to_string(),
                 ))?
                 .try_into()?,
         );
 
-        let event_decoder_handle: Option<EventDecoderFacilityHandle> = Some(
+        let event_decoder_handle: Option<EventSubscriptionFacilityHandle> = Some(
             device
-                .get_facility(FacilityType::EventDecoderFacility)
+        .get_facility(FacilityType::EventSubscriptionFacility)
                 .ok_or(DeviceFileError::UnsupportedFacility(
-                    "EventDecoderFacility".to_string(),
+                    "EventSubscriptionFacility".to_string(),
                 ))?
                 .try_into()?,
         );
@@ -130,27 +129,27 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
 
         self.stream_handle = Some(
             device
-                .get_facility(FacilityType::EventsStreamFacility)
+                .get_facility(FacilityType::RawEventStreamFacility)
                 .ok_or(DeviceFileError::UnsupportedFacility(
-                    "EventsStreamFacility".to_string(),
+                    "RawEventStreamFacility".to_string(),
                 ))?
                 .try_into()?,
         );
 
         self.decoder_handle = Some(
             device
-                .get_facility(FacilityType::EventsStreamDecoderFacility)
+                .get_facility(FacilityType::RawEventStreamDecoderFacility)
                 .ok_or(DeviceFileError::UnsupportedFacility(
-                    "EventsStreamDecoderFacility".to_string(),
+                    "RawEventStreamDecoderFacility".to_string(),
                 ))?
                 .try_into()?,
         );
 
         self.event_decoder_handle = Some(
             device
-                .get_facility(FacilityType::EventDecoderFacility)
+                .get_facility(FacilityType::EventSubscriptionFacility)
                 .ok_or(DeviceFileError::UnsupportedFacility(
-                    "EventDecoderFacility".to_string(),
+                    "EventSubscriptionFacility".to_string(),
                 ))?
                 .try_into()?,
         );
@@ -203,8 +202,8 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
             .try_write()
             .map_err(|_| DeviceFileError::LockError)?;
 
-        let stream = crate::facility_downcast_mut!(stream_facility, RREventStream<BUFFER_SIZE>)?;
-        let decoder = crate::facility_downcast_mut!(decoder_facility, RREventStreamDecoder)?;
+        let stream = crate::facility_downcast_mut!(stream_facility, RawEventStream<BUFFER_SIZE>)?;
+        let decoder = crate::facility_downcast_mut!(decoder_facility, RawEventStreamDecoder)?;
 
         index::seek_to_timestamp(
             index.as_ref(),
@@ -246,7 +245,8 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
     }
 
     /// Returns a receiver for decoded CD event batches and starts the stream.
-    pub fn cd_receiver(&mut self) -> Result<Receiver<Arc<PooledBuffer<EventCD>>>, DeviceFileError> {
+    pub fn cd_receiver(&mut self) -> Result<Receiver<Vec<EventCD>>, DeviceFileError> {
+        let (sender, receiver) = crossbeam::channel::unbounded();
         let stream_handle = self.get_stream_handle()?;
         let event_decoder_handle = self.get_event_decoder_handle()?;
         let mut stream_facility = stream_handle
@@ -259,17 +259,22 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
             .try_write()
             .map_err(|_| DeviceFileError::LockError)?;
 
-        let stream = crate::facility_downcast_mut!(stream_facility, RREventStream<BUFFER_SIZE>)?;
+        let stream = crate::facility_downcast_mut!(stream_facility, RawEventStream<BUFFER_SIZE>)?;
 
-        let cd_receiver = event_decoder_facility.subscribe_to_cd_events();
+        event_decoder_facility
+            .subscribe_to_cd_events(Box::new(move |events| {
+                let _ = sender.send(events.to_vec());
+            }))
+            .map_err(DeviceFileError::FacilityError)?;
         stream.start()?;
-        Ok(cd_receiver)
+        Ok(receiver)
     }
 
     /// Returns a receiver for decoded external-trigger event batches and starts the stream.
     pub fn ext_receiver(
         &mut self,
-    ) -> Result<Receiver<Arc<PooledBuffer<EventExtTrigger>>>, DeviceFileError> {
+    ) -> Result<Receiver<Vec<EventExtTrigger>>, DeviceFileError> {
+        let (sender, receiver) = crossbeam::channel::unbounded();
         let stream_handle = self.get_stream_handle()?;
         let event_decoder_handle = self.get_event_decoder_handle()?;
         let mut stream_facility = stream_handle
@@ -282,12 +287,16 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
             .try_write()
             .map_err(|_| DeviceFileError::LockError)?;
 
-        let stream = crate::facility_downcast_mut!(stream_facility, RREventStream<BUFFER_SIZE>)?;
+        let stream = crate::facility_downcast_mut!(stream_facility, RawEventStream<BUFFER_SIZE>)?;
 
-        let ext_receiver = ext_evt_decoder_facility.subscribe_to_ext_events();
+        ext_evt_decoder_facility
+            .subscribe_to_ext_events(Box::new(move |events| {
+                let _ = sender.send(events.to_vec());
+            }))
+            .map_err(DeviceFileError::FacilityError)?;
         stream.start()?;
 
-        Ok(ext_receiver)
+        Ok(receiver)
     }
 
     /// Loads one raw buffer from the stream and decodes it immediately.
@@ -304,9 +313,9 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
             .try_write()
             .map_err(|_| DeviceFileError::LockError)?;
 
-        let stream = crate::facility_downcast_mut!(stream_facility, RREventStream<BUFFER_SIZE>)?;
+        let stream = crate::facility_downcast_mut!(stream_facility, RawEventStream<BUFFER_SIZE>)?;
         let (buffer, _) = stream.poll_buffer()?;
-        decoder_facility.decode(buffer)?;
+        decoder_facility.decode(&buffer)?;
         Ok(())
     }
 
@@ -341,17 +350,17 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
         return Ok(());
     }
 
-    fn get_stream_handle(&self) -> Result<EventsStreamFacilityHandle, DeviceFileError> {
+    fn get_stream_handle(&self) -> Result<RawEventStreamFacilityHandle, DeviceFileError> {
         let _ = self.assert_initialized()?;
         Ok(self.stream_handle.clone().unwrap())
     }
 
-    fn get_event_decoder_handle(&self) -> Result<EventDecoderFacilityHandle, DeviceFileError> {
+    fn get_event_decoder_handle(&self) -> Result<EventSubscriptionFacilityHandle, DeviceFileError> {
         let _ = self.assert_initialized()?;
         Ok(self.event_decoder_handle.clone().unwrap())
     }
 
-    fn get_decoder_handle(&self) -> Result<EventsStreamDecoderFacilityHandle, DeviceFileError> {
+    fn get_decoder_handle(&self) -> Result<RawEventStreamDecoderFacilityHandle, DeviceFileError> {
         let _ = self.assert_initialized()?;
         Ok(self.decoder_handle.clone().unwrap())
     }
