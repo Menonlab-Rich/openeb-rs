@@ -1,12 +1,13 @@
 //! Plugin creation schemas and host-layer configuration validation.
 
 use super::plugin::{PluginConfiguration, PluginConfigurationValue};
-use serde::Deserialize;
-use std::collections::HashSet;
+use serde::{Deserialize, Serialize};
+use std::{collections::HashSet, fmt::Display};
 use thiserror::Error;
+use toml::ser;
 
 /// The semantic type of a plugin creation parameter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PluginParameterKind {
     /// Free-form text.
@@ -26,7 +27,7 @@ pub enum PluginParameterKind {
 }
 
 /// One field a plugin accepts when it creates a device.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PluginParameterSchema {
     /// Stable key used in [`PluginConfiguration`].
     pub name: String,
@@ -52,7 +53,7 @@ pub struct PluginParameterSchema {
 }
 
 /// A plugin's versioned TOML creation schema.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PluginConfigurationSchema {
     /// Schema format version.
     pub version: u32,
@@ -83,7 +84,9 @@ pub enum PluginConfigurationError {
     #[error("plugin configuration parameter `{0}` was supplied more than once")]
     DuplicateValue(String),
     /// A supplied value does not match the declared semantic type.
-    #[error("invalid value for plugin configuration parameter `{name}`; expected {expected}, got `{value}`")]
+    #[error(
+        "invalid value for plugin configuration parameter `{name}`; expected {expected}, got `{value}`"
+    )]
     InvalidValue {
         name: String,
         expected: String,
@@ -201,6 +204,19 @@ impl PluginConfigurationSchema {
             })
         }
     }
+
+    pub fn as_json(&self) -> serde_json::Result<String> {
+        serde_json::to_string(self)
+    }
+}
+
+impl Display for PluginConfigurationSchema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match ser::to_string(self) {
+            Ok(res) => write!(f, "{}", res),
+            Err(err) => write!(f, "{}{}", "[result]\nerror=", err),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -224,7 +240,12 @@ extensions = ["raw"]
         let config = schema.new_configuration("device-1");
         assert_eq!(config.serial, "device-1");
         assert!(config.values[0].value.is_none());
-        assert_eq!(schema.validate(&config), Err(PluginConfigurationError::MissingRequired("input_file".into())));
+        assert_eq!(
+            schema.validate(&config),
+            Err(PluginConfigurationError::MissingRequired(
+                "input_file".into()
+            ))
+        );
     }
 
     #[test]
