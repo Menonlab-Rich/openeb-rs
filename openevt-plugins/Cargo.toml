@@ -2,6 +2,13 @@
 name = "openevt-plugins"
 version = "1.0.1"
 edition = "2024"
+exclude = [
+    "assets/*",
+    "tests/data/*",
+    "*.mp4",
+    "*.mkv",
+    "*.avi",
+]
 
 [dependencies]
 ffmpeg-next = "8.1.0"
@@ -21,3 +28,4 @@ python = ["dep:pyo3"]
 
 [lib]
 crate-type = ["rlib", "cdylib"]
+
