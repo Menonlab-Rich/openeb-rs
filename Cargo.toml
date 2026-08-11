@@ -1,10 +1,10 @@
 [workspace]
-members = [".", "openeb-rs", "openevt-plugins"]
+members = [".", "openevt-plugins"]
 resolver = "3"
 
 [package]
 name = "openevt"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 authors = ["Rich Baird <rich@rbaird.me>"]
 description = "An independently maintained Rust implementation inspired by Prophesee's OpenEB event-camera abstractions"
