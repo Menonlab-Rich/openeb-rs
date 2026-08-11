@@ -9,6 +9,8 @@ exclude = [
     "*.mkv",
     "*.avi",
 ]
+description = "Device plugins to be used with the openevt crate"
+license = "MIT"
 
 [dependencies]
 ffmpeg-next = "8.1.0"
