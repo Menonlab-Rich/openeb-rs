@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct EvsParameters {
     // --- Physical and Circuit Constants ---
     /// Gain of the inverting amplifier in the feedback path of the logarithmic amplifier.
@@ -37,6 +38,17 @@ pub struct EvsParameters {
     /// System time constant for the source follower node, determining the bandwidth of the autoregressive noise model.
     pub tau_o1: f32,
 
+    /// Dark photocurrent added to every input pixel (Eq. 4's `I_PD = I_photo + I_dark`).
+    pub dark_current: f32,
+
+    /// Stationary standard deviation of the front-end voltage noise.
+    /// The corresponding white-noise input is derived from Eq. 23.
+    pub noise_fe_std: f32,
+
+    /// Stationary standard deviation of the source-follower voltage noise.
+    /// The corresponding white-noise input is derived from Eq. 23.
+    pub noise_o1_std: f32,
+
     // --- Difference Detector Constants ---
     /// The positive voltage differential required by the difference detector to trigger an ON event.
     pub threshold_on: f32,
@@ -59,6 +71,9 @@ impl Default for EvsParameters {
             dt: 0.01,
             tau_fe: 1.0,
             tau_o1: 1.0,
+            dark_current: 0.0,
+            noise_fe_std: 0.01,
+            noise_o1_std: 0.01,
             threshold_on: 0.1,
             threshold_off: 0.1,
         }
@@ -80,6 +95,9 @@ impl EvsParameters {
             ("dt", self.dt),
             ("tau_fe", self.tau_fe),
             ("tau_o1", self.tau_o1),
+            ("dark_current", self.dark_current),
+            ("noise_fe_std", self.noise_fe_std),
+            ("noise_o1_std", self.noise_o1_std),
             ("threshold_on", self.threshold_on),
             ("threshold_off", self.threshold_off),
         ];
@@ -104,6 +122,18 @@ impl EvsParameters {
                 return Err(format!("simulation parameter `{name}` must be positive"));
             }
         }
+        for (name, value) in [
+            ("dark_current", self.dark_current),
+            ("noise_fe_std", self.noise_fe_std),
+            ("noise_o1_std", self.noise_o1_std),
+        ] {
+            if value < 0.0 {
+                return Err(format!("simulation parameter `{name}` must be non-negative"));
+            }
+        }
+        if self.dt > self.tau_fe || self.dt > self.tau_o1 {
+            return Err("simulation time step must not exceed either noise time constant".into());
+        }
         Ok(())
     }
 }
@@ -127,6 +157,40 @@ pub struct Event {
 pub struct EvsSimulator {
     params: EvsParameters,
     state: EvsState,
+    noise: NoiseGenerator,
+}
+
+/// Small deterministic Gaussian source. A fixed seed makes generated data
+/// reproducible while still exercising the paper's temporal noise model.
+struct NoiseGenerator {
+    state: u64,
+    spare: Option<f32>,
+}
+
+impl NoiseGenerator {
+    fn new() -> Self {
+        Self {
+            state: 0x8e3f_2a91_5c77_b4d1,
+            spare: None,
+        }
+    }
+
+    fn uniform(&mut self) -> f32 {
+        self.state ^= self.state << 13;
+        self.state ^= self.state >> 7;
+        self.state ^= self.state << 17;
+        (self.state as f32 / u64::MAX as f32).clamp(f32::MIN_POSITIVE, 1.0)
+    }
+
+    fn standard_normal(&mut self) -> f32 {
+        if let Some(value) = self.spare.take() {
+            return value;
+        }
+        let radius = (-2.0 * self.uniform().ln()).sqrt();
+        let angle = 2.0 * std::f32::consts::PI * self.uniform();
+        self.spare = Some(radius * angle.sin());
+        radius * angle.cos()
+    }
 }
 
 impl EvsSimulator {
@@ -136,11 +200,42 @@ impl EvsSimulator {
         Ok(Self {
             params,
             state: EvsState::new(num_pixels),
+            noise: NoiseGenerator::new(),
         })
     }
 
-    /// Feeds one frame of photocurrents and returns its generated CD events.
+    /// Advances the model by one Forward-Euler step using one photocurrent
+    /// frame and returns the generated CD events.
     pub fn process_frame(
+        &mut self,
+        photocurrents: &[f32],
+        timestamp: f32,
+    ) -> Result<Vec<Event>, String> {
+        self.process_step(photocurrents, timestamp)
+    }
+
+    /// Holds a video frame for its wall-clock duration and advances the model
+    /// at the paper's numerical time-step. This is the frame upsampling needed
+    /// to avoid making the ODE dynamics depend on the encoded video FPS.
+    pub fn process_frame_over_interval(
+        &mut self,
+        photocurrents: &[f32],
+        timestamp_us: f32,
+        duration_s: f32,
+    ) -> Result<Vec<Event>, String> {
+        if !duration_s.is_finite() || duration_s <= 0.0 {
+            return Err("frame duration must be finite and positive".into());
+        }
+        let steps = (duration_s / self.params.dt).ceil() as usize;
+        let mut events = Vec::new();
+        for step in 0..steps.max(1) {
+            let step_time_us = ((step + 1) as f32 * self.params.dt).min(duration_s) * 1_000_000.0;
+            events.extend(self.process_step(photocurrents, timestamp_us + step_time_us)?);
+        }
+        Ok(events)
+    }
+
+    fn process_step(
         &mut self,
         photocurrents: &[f32],
         timestamp: f32,
@@ -152,19 +247,48 @@ impl EvsSimulator {
                 self.state.dphi_fe.len()
             ));
         }
-        let zeros = vec![0.0; photocurrents.len()];
+        let noise_fe_sigma = autoregressive_input_std(
+            self.params.noise_fe_std,
+            self.params.dt,
+            self.params.tau_fe,
+        );
+        let noise_o1_sigma = autoregressive_input_std(
+            self.params.noise_o1_std,
+            self.params.dt,
+            self.params.tau_o1,
+        );
+        let mut noise_samples_fe = Vec::with_capacity(photocurrents.len());
+        let mut noise_samples_o1 = Vec::with_capacity(photocurrents.len());
+        for _ in photocurrents {
+            noise_samples_fe.push(self.noise.standard_normal() * noise_fe_sigma);
+            noise_samples_o1.push(self.noise.standard_normal() * noise_o1_sigma);
+        }
+        let photocurrents: Vec<f32> = photocurrents
+            .iter()
+            .map(|current| current + self.params.dark_current)
+            .collect();
         let mut events = Vec::new();
         step_forward_euler(
             &mut self.state,
             &self.params,
             timestamp,
-            photocurrents,
-            &zeros,
-            &zeros,
+            &photocurrents,
+            &noise_samples_fe,
+            &noise_samples_o1,
             &mut events,
         );
         Ok(events)
     }
+}
+
+/// Converts the desired stationary standard deviation (Eq. 23) into the
+/// standard deviation of the white-noise samples used by Eq. 19.
+fn autoregressive_input_std(stationary_std: f32, dt: f32, tau: f32) -> f32 {
+    if stationary_std == 0.0 {
+        return 0.0;
+    }
+    let ratio = dt / tau;
+    stationary_std * (1.0 - (1.0 - ratio).powi(2)).sqrt() / ratio
 }
 
 impl EvsState {

@@ -13,7 +13,7 @@ use ffmpeg_next::util::frame::video::Video;
 use openevt::hal::device::configuration::PluginConfigurationSchema;
 use openevt::hal::device::discovery::ConnectionType;
 use openevt::hal::device::plugin::{
-    self, DeviceDiscoveryPlugin, DeviceDiscoveryPlugin_TO, DeviceDiscoveryPluginBox, DevicePlugin,
+    self, DeviceDiscoveryPlugin, DeviceDiscoveryPlugin_TO, DeviceDiscoveryPluginBox,
     DevicePlugin_TO, DevicePluginBox, DevicePluginModuleRef, DevicePluginModuleVtable,
     EventBatchSinkBox, PluginCameraDescriptionAbi, PluginConfiguration,
     PluginEventSubscriptionFacility, PluginEventSubscriptionFacility_TO, PluginFacility,
@@ -26,6 +26,11 @@ use std::fs;
 use std::sync::{Arc, Mutex};
 
 const SIMULATOR_SERIAL: &str = "EventSimulator";
+// Keep the simulator's pull granularity comparable to the other plugins:
+// one host request advances a useful batch of data instead of one video
+// frame. The simulator state is still updated frame-by-frame inside the
+// batch, which preserves event ordering and timestamps.
+const FRAME_BATCH_SIZE: usize = 32;
 const RAW_EVENT_SIMULATOR_SCHEMA: &str = r#"
 version = 1
 
@@ -67,6 +72,8 @@ struct VideoSimulator {
     frame_index: u64,
     packet_pending: bool,
     eof_sent: bool,
+    rgb: Video,
+    photocurrents: Vec<f32>,
     simulator: EvsSimulator,
 }
 
@@ -130,12 +137,14 @@ impl VideoSimulator {
             frame_index: 0,
             packet_pending: false,
             eof_sent: false,
+            rgb: Video::empty(),
+            photocurrents: Vec::with_capacity(width * height),
             simulator: EvsSimulator::new(width * height, params)
                 .map_err(|error| error.to_string())?,
         })
     }
 
-    fn next_events(&mut self) -> Result<Option<Vec<EventCD>>, String> {
+    fn next_frame_events(&mut self) -> Result<Option<Vec<EventCD>>, String> {
         loop {
             if self.packet_pending {
                 let mut decoded = Video::empty();
@@ -170,15 +179,32 @@ impl VideoSimulator {
         }
     }
 
+    fn next_events_batch(&mut self) -> Result<Option<Vec<EventCD>>, String> {
+        let mut events = Vec::new();
+        let mut decoded_frame = false;
+
+        for _ in 0..FRAME_BATCH_SIZE {
+            let Some(frame_events) = self.next_frame_events()? else {
+                break;
+            };
+            decoded_frame = true;
+            events.extend(frame_events);
+        }
+
+        // An empty event batch is still meaningful when frames were decoded:
+        // it advances the stream by FRAME_BATCH_SIZE frames (or to EOF).
+        Ok(decoded_frame.then_some(events))
+    }
+
     fn process_frame(&mut self, decoded: &Video) -> Result<Vec<EventCD>, String> {
-        let mut rgb = Video::empty();
         self.scaler
-            .run(decoded, &mut rgb)
+            .run(decoded, &mut self.rgb)
             .map_err(|error| error.to_string())?;
 
-        let stride = rgb.stride(0);
-        let data = rgb.data(0);
-        let mut photocurrents = Vec::with_capacity(self.width * self.height);
+        let stride = self.rgb.stride(0);
+        let data = self.rgb.data(0);
+        self.photocurrents.clear();
+        self.photocurrents.reserve(self.width * self.height);
         for y in 0..self.height {
             let row = &data[y * stride..];
             for x in 0..self.width {
@@ -189,7 +215,7 @@ impl VideoSimulator {
                 let luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255.0;
                 // Keep a dark pixel above zero while preserving the video's
                 // relative brightness as the simulated photocurrent.
-                photocurrents.push(luminance);
+                self.photocurrents.push(luminance);
             }
         }
 
@@ -197,7 +223,11 @@ impl VideoSimulator {
         self.frame_index += 1;
         let generated = self
             .simulator
-            .process_frame(&photocurrents, timestamp)
+            .process_frame_over_interval(
+                &self.photocurrents,
+                timestamp,
+                1.0 / self.fps as f32,
+            )
             .map_err(|error| error.to_string())?;
 
         Ok(generated
@@ -230,7 +260,7 @@ impl SimulatorState {
             }
             let events = lock
                 .simulator
-                .next_events()?
+                .next_events_batch()?
                 .ok_or_else(|| "end of simulator video".to_owned())?;
             (
                 events,
