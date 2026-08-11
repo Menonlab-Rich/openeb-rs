@@ -17,7 +17,8 @@ pub use decoder::RawEventStreamDecoder;
 pub use iterator::*;
 #[cfg(feature = "bundled-plugins")]
 pub use plugin::RawFilePlugin;
-pub(crate) use reader::RawFileReader;
+/// High-level convenience reader for raw event files.
+pub use reader::RawFileReader;
 
 #[cfg(test)]
 mod tests;

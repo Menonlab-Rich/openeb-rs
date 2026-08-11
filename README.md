@@ -41,8 +41,9 @@ The primary modules are:
 
 For a developer-focused walkthrough of dynamic device plugins, see the
 [plugin development guide](docs/plugin-development-guide.md). Raw-file access
-is available exclusively through the [raw-file plugin](docs/raw-file-plugin.md);
-the native handler and reader remain private implementation details.
+is available through the [raw-file plugin](docs/raw-file-plugin.md) or directly
+through the public `RawFileReader` convenience API; the native handler and
+stream implementation remain private details.
 The video simulator is documented in the [simulator plugin guide](docs/simulator-plugin.md).
 
 Set `OPENEVT_PLUGIN_PATH` to the directory containing the plugin before using a

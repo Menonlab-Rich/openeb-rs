@@ -1,6 +1,6 @@
 //! High-level API for reading raw event files.
 //!
-//! `RawFileReader` is the private implementation used by the raw-file plugin.
+//! `RawFileReader` is the high-level convenience API for reading raw files.
 //! It opens a file, wires up the stream and decoder facilities, and provides helper
 //! methods for:
 //!
