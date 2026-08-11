@@ -1,3 +1,4 @@
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -21,6 +22,10 @@ pub struct EvsParameters {
 
     /// Initial stationary drain current of the front-end transistor at time t0, matching the initial photocurrent
     pub i_d1_t0: f32,
+
+    /// Multiplier applied to normalized video luminance before it is used as
+    /// photocurrent. A value of 1.0 maps 8-bit luminance directly to [0, 1].
+    pub photocurrent_scale: f32,
 
     /// Initial stationary drain current of the source follower transistor at time t0
     pub i_d2_t0: f32,
@@ -55,6 +60,10 @@ pub struct EvsParameters {
 
     /// The negative voltage differential required by the difference detector to trigger an OFF event.
     pub threshold_off: f32,
+
+    /// Shared AER arbiter throughput in event-equivalent pixels per second.
+    /// Each active row consumes one full-row transfer from this budget.
+    pub arbiter_throughput_events_per_second: f32,
 }
 
 impl Default for EvsParameters {
@@ -65,17 +74,22 @@ impl Default for EvsParameters {
             c_lsf: 1.0,
             zeta: 1.2,
             v_t: 0.02585,
-            i_d1_t0: 1.0,
+            // The bundled lightning video has an ordinary-frame luminance of
+            // roughly 25/255, so a unit baseline treats nearly every pixel as
+            // permanently below its operating point.
+            i_d1_t0: 0.1,
+            photocurrent_scale: 1.0,
             i_d2_t0: 1.0,
             i_sf: 1.0,
             dt: 0.01,
             tau_fe: 1.0,
             tau_o1: 1.0,
             dark_current: 0.0,
-            noise_fe_std: 0.01,
-            noise_o1_std: 0.01,
-            threshold_on: 0.1,
-            threshold_off: 0.1,
+            noise_fe_std: 0.0001,
+            noise_o1_std: 0.0001,
+            threshold_on: 0.001,
+            threshold_off: 0.001,
+            arbiter_throughput_events_per_second: 20_000_000.0,
         }
     }
 }
@@ -90,6 +104,7 @@ impl EvsParameters {
             ("zeta", self.zeta),
             ("v_t", self.v_t),
             ("i_d1_t0", self.i_d1_t0),
+            ("photocurrent_scale", self.photocurrent_scale),
             ("i_d2_t0", self.i_d2_t0),
             ("i_sf", self.i_sf),
             ("dt", self.dt),
@@ -100,6 +115,10 @@ impl EvsParameters {
             ("noise_o1_std", self.noise_o1_std),
             ("threshold_on", self.threshold_on),
             ("threshold_off", self.threshold_off),
+            (
+                "arbiter_throughput_events_per_second",
+                self.arbiter_throughput_events_per_second,
+            ),
         ];
         if let Some((name, _)) = values.iter().find(|(_, value)| !value.is_finite()) {
             return Err(format!("simulation parameter `{name}` must be finite"));
@@ -110,6 +129,7 @@ impl EvsParameters {
             ("zeta", self.zeta),
             ("v_t", self.v_t),
             ("i_d1_t0", self.i_d1_t0),
+            ("photocurrent_scale", self.photocurrent_scale),
             ("i_d2_t0", self.i_d2_t0),
             ("i_sf", self.i_sf),
             ("dt", self.dt),
@@ -117,6 +137,10 @@ impl EvsParameters {
             ("tau_o1", self.tau_o1),
             ("threshold_on", self.threshold_on),
             ("threshold_off", self.threshold_off),
+            (
+                "arbiter_throughput_events_per_second",
+                self.arbiter_throughput_events_per_second,
+            ),
         ] {
             if value <= 0.0 {
                 return Err(format!("simulation parameter `{name}` must be positive"));
@@ -128,7 +152,9 @@ impl EvsParameters {
             ("noise_o1_std", self.noise_o1_std),
         ] {
             if value < 0.0 {
-                return Err(format!("simulation parameter `{name}` must be non-negative"));
+                return Err(format!(
+                    "simulation parameter `{name}` must be non-negative"
+                ));
             }
         }
         if self.dt > self.tau_fe || self.dt > self.tau_o1 {
@@ -158,6 +184,7 @@ pub struct EvsSimulator {
     params: EvsParameters,
     state: EvsState,
     noise: NoiseGenerator,
+    noise_samples: NoiseSamples,
 }
 
 /// Small deterministic Gaussian source. A fixed seed makes generated data
@@ -165,6 +192,12 @@ pub struct EvsSimulator {
 struct NoiseGenerator {
     state: u64,
     spare: Option<f32>,
+}
+
+#[derive(Default)]
+struct NoiseSamples {
+    fe: Vec<f32>,
+    o1: Vec<f32>,
 }
 
 impl NoiseGenerator {
@@ -193,6 +226,7 @@ impl NoiseGenerator {
     }
 }
 
+#[hotpath::measure_all]
 impl EvsSimulator {
     /// Creates a simulator for a sensor containing `num_pixels` pixels.
     pub fn new(num_pixels: usize, params: EvsParameters) -> Result<Self, String> {
@@ -201,7 +235,15 @@ impl EvsSimulator {
             params,
             state: EvsState::new(num_pixels),
             noise: NoiseGenerator::new(),
+            noise_samples: NoiseSamples::default(),
         })
+    }
+
+    /// Resets the circuit and noise state before replaying from a new time.
+    pub fn reset(&mut self) {
+        self.state = EvsState::new(self.state.dphi_fe.len());
+        self.noise = NoiseGenerator::new();
+        self.noise_samples = NoiseSamples::default();
     }
 
     /// Advances the model by one Forward-Euler step using one photocurrent
@@ -247,34 +289,14 @@ impl EvsSimulator {
                 self.state.dphi_fe.len()
             ));
         }
-        let noise_fe_sigma = autoregressive_input_std(
-            self.params.noise_fe_std,
-            self.params.dt,
-            self.params.tau_fe,
-        );
-        let noise_o1_sigma = autoregressive_input_std(
-            self.params.noise_o1_std,
-            self.params.dt,
-            self.params.tau_o1,
-        );
-        let mut noise_samples_fe = Vec::with_capacity(photocurrents.len());
-        let mut noise_samples_o1 = Vec::with_capacity(photocurrents.len());
-        for _ in photocurrents {
-            noise_samples_fe.push(self.noise.standard_normal() * noise_fe_sigma);
-            noise_samples_o1.push(self.noise.standard_normal() * noise_o1_sigma);
-        }
-        let photocurrents: Vec<f32> = photocurrents
-            .iter()
-            .map(|current| current + self.params.dark_current)
-            .collect();
         let mut events = Vec::new();
-        step_forward_euler(
+        step_forward_euler_with_noise(
             &mut self.state,
             &self.params,
             timestamp,
-            &photocurrents,
-            &noise_samples_fe,
-            &noise_samples_o1,
+            photocurrents,
+            &mut self.noise,
+            &mut self.noise_samples,
             &mut events,
         );
         Ok(events)
@@ -304,6 +326,7 @@ impl EvsState {
 }
 
 /// Executes a single microsecond Forward-Euler time step across the entire sensor array.
+#[hotpath::measure]
 pub fn step_forward_euler(
     state: &mut EvsState,
     params: &EvsParameters,
@@ -313,7 +336,57 @@ pub fn step_forward_euler(
     noise_samples_o1: &[f32], // Random normal samples e(n) ~ N(0, sigma_o1)
     events_out: &mut Vec<Event>,
 ) {
-    let num_pixels = state.dphi_fe.len();
+    step_forward_euler_impl(
+        state,
+        params,
+        current_time,
+        i_pd,
+        noise_samples_fe,
+        noise_samples_o1,
+        events_out,
+    );
+}
+
+/// Generates the frame's noise samples serially, then updates all pixels in
+/// parallel. Keeping the RNG serial preserves the simulator's deterministic
+/// noise stream while leaving the expensive pixel math embarrassingly parallel.
+fn step_forward_euler_with_noise(
+    state: &mut EvsState,
+    params: &EvsParameters,
+    current_time: f32,
+    photocurrents: &[f32],
+    noise: &mut NoiseGenerator,
+    samples: &mut NoiseSamples,
+    events_out: &mut Vec<Event>,
+) {
+    let noise_fe_sigma = autoregressive_input_std(params.noise_fe_std, params.dt, params.tau_fe);
+    let noise_o1_sigma = autoregressive_input_std(params.noise_o1_std, params.dt, params.tau_o1);
+    samples.fe.resize(photocurrents.len(), 0.0);
+    samples.o1.resize(photocurrents.len(), 0.0);
+    for (fe, o1) in samples.fe.iter_mut().zip(samples.o1.iter_mut()) {
+        *fe = noise.standard_normal() * noise_fe_sigma;
+        *o1 = noise.standard_normal() * noise_o1_sigma;
+    }
+    step_forward_euler_impl(
+        state,
+        params,
+        current_time,
+        photocurrents,
+        &samples.fe,
+        &samples.o1,
+        events_out,
+    );
+}
+
+fn step_forward_euler_impl(
+    state: &mut EvsState,
+    params: &EvsParameters,
+    current_time: f32,
+    i_pd: &[f32],
+    noise_samples_fe: &[f32],
+    noise_samples_o1: &[f32],
+    events_out: &mut Vec<Event>,
+) {
     let dt = params.dt;
 
     // Precompute invariant coefficients for Equation 5
@@ -329,54 +402,103 @@ pub fn step_forward_euler(
     let ar_fe_scale = dt / params.tau_fe;
     let ar_o1_scale = dt / params.tau_o1;
 
-    for i in 0..num_pixels {
-        // 1. Logarithmic Amplifier ODE Integration
-        let fe_exponent = (fe_exp_scale * state.dphi_fe[i]).clamp(-80.0, 80.0);
-        let d_dphi_fe = fe_coeff_1 * i_pd[i] - fe_coeff_2 * fe_exponent.exp();
-        state.dphi_fe[i] += d_dphi_fe * dt;
+    let mut events: Vec<Event> = state
+        .dphi_fe
+        .par_iter_mut()
+        .zip(state.dphi_o1.par_iter_mut())
+        .zip(state.noise_fe.par_iter_mut())
+        .zip(state.noise_o1.par_iter_mut())
+        .zip(state.ref_voltage.par_iter_mut())
+        .zip(i_pd.par_iter())
+        .zip(noise_samples_fe.par_iter())
+        .zip(noise_samples_o1.par_iter())
+        .enumerate()
+        .map(
+            |(
+                i,
+                (
+                    (
+                        (((((dphi_fe, dphi_o1), noise_fe), noise_o1), ref_voltage), photocurrent),
+                        noise_sample_fe,
+                    ),
+                    noise_sample_o1,
+                ),
+            )| {
+                let photocurrent = *photocurrent + params.dark_current;
 
-        // 2. Front-End Autoregressive Noise Update
-        state.noise_fe[i] += (noise_samples_fe[i] - state.noise_fe[i]) * ar_fe_scale;
+                // 1. Logarithmic Amplifier ODE Integration
+                let fe_exponent = (fe_exp_scale * *dphi_fe).clamp(-80.0, 80.0);
+                let d_dphi_fe = fe_coeff_1 * photocurrent - fe_coeff_2 * fe_exponent.exp();
+                *dphi_fe += d_dphi_fe * dt;
 
-        // Superposition of signal and noise at FE node
-        let noisy_fe = state.dphi_fe[i] + state.noise_fe[i];
+                // 2. Front-End Autoregressive Noise Update
+                *noise_fe += (*noise_sample_fe - *noise_fe) * ar_fe_scale;
 
-        // 3. Source Follower ODE Integration
-        let d_dphi_o1 = o1_coeff_1
-            * (params.i_sf
-                - params.i_d2_t0
-                    * (((params.zeta * state.dphi_o1[i] - noisy_fe) / o1_exp_denom)
-                        .clamp(-80.0, 80.0)
-                        .exp()));
-        state.dphi_o1[i] += d_dphi_o1 * dt;
+                // Superposition of signal and noise at FE node
+                let noisy_fe = *dphi_fe + *noise_fe;
 
-        // 4. Source Follower Autoregressive Noise Update
-        state.noise_o1[i] += (noise_samples_o1[i] - state.noise_o1[i]) * ar_o1_scale;
+                // 3. Source Follower ODE Integration
+                let d_dphi_o1 = o1_coeff_1
+                    * (params.i_sf
+                        - params.i_d2_t0
+                            * (((params.zeta * *dphi_o1 - noisy_fe) / o1_exp_denom)
+                                .clamp(-80.0, 80.0)
+                                .exp()));
+                *dphi_o1 += d_dphi_o1 * dt;
 
-        // Superposition of signal and noise at SF node
-        let noisy_o1 = state.dphi_o1[i] + state.noise_o1[i];
+                // 4. Source Follower Autoregressive Noise Update
+                *noise_o1 += (*noise_sample_o1 - *noise_o1) * ar_o1_scale;
 
-        // 5. Difference Detector (Comparator) Evaluation
-        let voltage_diff = noisy_o1 - state.ref_voltage[i];
+                // Superposition of signal and noise at SF node
+                let noisy_o1 = *dphi_o1 + *noise_o1;
 
-        if voltage_diff >= params.threshold_on {
-            events_out.push(Event {
-                timestamp: current_time,
-                pixel_index: i,
-                polarity: true,
-            });
-            // Reset reference voltage upon firing
-            state.ref_voltage[i] = noisy_o1;
-        } else if voltage_diff <= -params.threshold_off {
-            events_out.push(Event {
-                timestamp: current_time,
-                pixel_index: i,
-                polarity: false,
-            });
-            // Reset reference voltage upon firing
-            state.ref_voltage[i] = noisy_o1;
-        }
+                // 5. Difference Detector (Comparator) Evaluation
+                let voltage_diff = noisy_o1 - *ref_voltage;
+
+                if voltage_diff >= params.threshold_on {
+                    *ref_voltage = noisy_o1;
+                    Some(Event {
+                        timestamp: current_time,
+                        pixel_index: i,
+                        polarity: true,
+                    })
+                } else if voltage_diff <= -params.threshold_off {
+                    *ref_voltage = noisy_o1;
+                    Some(Event {
+                        timestamp: current_time,
+                        pixel_index: i,
+                        polarity: false,
+                    })
+                } else {
+                    None
+                }
+            },
+        )
+        .flatten()
+        .collect();
+
+    // Model finite AER bandwidth by randomly sampling the requests that can
+    // be transmitted during this integration step. The ranking is generated
+    // from the event identity and timestamp rather than shared mutable RNG
+    // state, so the result remains deterministic under parallel execution.
+    let max_events = (params.arbiter_throughput_events_per_second * dt).floor() as usize;
+    if events.len() > max_events {
+        events.sort_unstable_by_key(|event| {
+            let mut value = event.pixel_index as u64;
+            value ^= (event.timestamp.to_bits() as u64).rotate_left(21);
+            value ^= (event.polarity as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+            splitmix64(value)
+        });
+        events.truncate(max_events);
     }
+    events_out.extend(events);
+}
+
+fn splitmix64(mut value: u64) -> u64 {
+    value = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
 }
 
 #[cfg(test)]

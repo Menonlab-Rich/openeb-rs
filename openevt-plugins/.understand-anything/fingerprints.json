@@ -1,0 +1,828 @@
+{
+  "version": "1.0.0",
+  "gitCommitHash": "212ac8709bc178b68334e06ae9df335041a7e8e5",
+  "generatedAt": "2026-08-11T18:13:19.090Z",
+  "files": {
+    "Cargo.toml": {
+      "filePath": "Cargo.toml",
+      "contentHash": "7af7cc90d13c08e70bff5391b6c3cddbb11ac836a7217181bd6037b001eaeceb",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 16,
+      "hasStructuralAnalysis": true
+    },
+    "src/lib.rs": {
+      "filePath": "src/lib.rs",
+      "contentHash": "2785f1133f17f64f625837100f34a8bdd6e96267432fbf9ead483d13651e5ef4",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2,
+      "hasStructuralAnalysis": true
+    },
+    "src/simulator/mod.rs": {
+      "filePath": "src/simulator/mod.rs",
+      "contentHash": "5e746930e54a949b8199050d4de49982573faadb50c6bc7fd84472457b614bb3",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 4,
+      "hasStructuralAnalysis": true
+    },
+    "src/simulator/error.rs": {
+      "filePath": "src/simulator/error.rs",
+      "contentHash": "d8cefac442bb6d1bc7ca7a84eb776e0212080f50356dab1658e5cab21d91e6a5",
+      "functions": [],
+      "classes": [
+        {
+          "name": "SimError",
+          "methods": [],
+          "properties": [
+            "Io",
+            "Toml",
+            "Ffmpeg",
+            "InvalidConfiguration"
+          ],
+          "exported": true,
+          "lineCount": 10
+        }
+      ],
+      "imports": [
+        {
+          "source": "thiserror",
+          "specifiers": [
+            "Error"
+          ]
+        }
+      ],
+      "exports": [
+        "SimError"
+      ],
+      "totalLines": 14,
+      "hasStructuralAnalysis": true
+    },
+    "src/simulator/solver.rs": {
+      "filePath": "src/simulator/solver.rs",
+      "contentHash": "166151bb54e52c729151b6951428b88b1b82b1f932917a508a44802ef51f4309",
+      "functions": [
+        {
+          "name": "default",
+          "params": [],
+          "returnType": "Self",
+          "exported": false,
+          "lineCount": 20
+        },
+        {
+          "name": "validate",
+          "params": [],
+          "returnType": "Result<(), String>",
+          "exported": true,
+          "lineCount": 54
+        },
+        {
+          "name": "new",
+          "params": [],
+          "returnType": "Self",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "uniform",
+          "params": [],
+          "returnType": "f32",
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "standard_normal",
+          "params": [],
+          "returnType": "f32",
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "new",
+          "params": [
+            "num_pixels",
+            "params"
+          ],
+          "returnType": "Result<Self, String>",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "process_frame",
+          "params": [
+            "photocurrents",
+            "timestamp"
+          ],
+          "returnType": "Result<Vec<Event>, String>",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "process_frame_over_interval",
+          "params": [
+            "photocurrents",
+            "timestamp_us",
+            "duration_s"
+          ],
+          "returnType": "Result<Vec<Event>, String>",
+          "exported": true,
+          "lineCount": 17
+        },
+        {
+          "name": "process_step",
+          "params": [
+            "photocurrents",
+            "timestamp"
+          ],
+          "returnType": "Result<Vec<Event>, String>",
+          "exported": false,
+          "lineCount": 44
+        },
+        {
+          "name": "autoregressive_input_std",
+          "params": [
+            "stationary_std",
+            "dt",
+            "tau"
+          ],
+          "returnType": "f32",
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "new",
+          "params": [
+            "num_pixels"
+          ],
+          "returnType": "Self",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "step_forward_euler",
+          "params": [
+            "state",
+            "params",
+            "current_time",
+            "i_pd",
+            "noise_samples_fe",
+            "noise_samples_o1",
+            "events_out"
+          ],
+          "exported": true,
+          "lineCount": 74
+        }
+      ],
+      "classes": [
+        {
+          "name": "EvsParameters",
+          "methods": [
+            "default",
+            "validate"
+          ],
+          "properties": [
+            "a",
+            "c_c",
+            "c_lsf",
+            "zeta",
+            "v_t",
+            "i_d1_t0",
+            "i_d2_t0",
+            "i_sf",
+            "dt",
+            "tau_fe",
+            "tau_o1",
+            "dark_current",
+            "noise_fe_std",
+            "noise_o1_std",
+            "threshold_on",
+            "threshold_off"
+          ],
+          "exported": true,
+          "lineCount": 54
+        },
+        {
+          "name": "EvsState",
+          "methods": [
+            "new"
+          ],
+          "properties": [
+            "dphi_fe",
+            "dphi_o1",
+            "noise_fe",
+            "noise_o1",
+            "ref_voltage"
+          ],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "Event",
+          "methods": [],
+          "properties": [
+            "timestamp",
+            "pixel_index",
+            "polarity"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "EvsSimulator",
+          "methods": [
+            "new",
+            "process_frame",
+            "process_frame_over_interval",
+            "process_step"
+          ],
+          "properties": [
+            "params",
+            "state",
+            "noise"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "NoiseGenerator",
+          "methods": [
+            "new",
+            "uniform",
+            "standard_normal"
+          ],
+          "properties": [
+            "state",
+            "spare"
+          ],
+          "exported": false,
+          "lineCount": 4
+        }
+      ],
+      "imports": [
+        {
+          "source": "serde",
+          "specifiers": [
+            "Deserialize",
+            "Serialize"
+          ]
+        }
+      ],
+      "exports": [
+        "EvsParameters",
+        "validate",
+        "EvsState",
+        "Event",
+        "EvsSimulator",
+        "new",
+        "process_frame",
+        "process_frame_over_interval",
+        "new",
+        "step_forward_euler"
+      ],
+      "totalLines": 398,
+      "hasStructuralAnalysis": true
+    },
+    "src/simulator/plugin.rs": {
+      "filePath": "src/simulator/plugin.rs",
+      "contentHash": "94dc84500f592074fe3695d5a5e545ca727c5a571295fb26d538301819914c70",
+      "functions": [
+        {
+          "name": "open",
+          "params": [
+            "video_path",
+            "fps_override",
+            "params"
+          ],
+          "returnType": "Result<Self, String>",
+          "exported": false,
+          "lineCount": 59
+        },
+        {
+          "name": "next_frame_events",
+          "params": [],
+          "returnType": "Result<Option<Vec<EventCD>>, String>",
+          "exported": false,
+          "lineCount": 34
+        },
+        {
+          "name": "next_events_batch",
+          "params": [],
+          "returnType": "Result<Option<Vec<EventCD>>, String>",
+          "exported": false,
+          "lineCount": 16
+        },
+        {
+          "name": "process_frame",
+          "params": [
+            "decoded"
+          ],
+          "returnType": "Result<Vec<EventCD>, String>",
+          "exported": false,
+          "lineCount": 44
+        },
+        {
+          "name": "advance",
+          "params": [
+            "state"
+          ],
+          "returnType": "Result<(), String>",
+          "exported": false,
+          "lineCount": 33
+        },
+        {
+          "name": "request",
+          "params": [],
+          "returnType": "RResult<PluginStreamBuffer, RString>",
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "start",
+          "params": [],
+          "returnType": "RResult<(), RString>",
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "stop",
+          "params": [],
+          "returnType": "RResult<(), RString>",
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "poll_buffer",
+          "params": [],
+          "returnType": "RResult<PluginStreamBuffer, RString>",
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "wait_next_buffer",
+          "params": [],
+          "returnType": "RResult<PluginStreamBuffer, RString>",
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "subscribe_to_cd_events",
+          "params": [
+            "sink"
+          ],
+          "returnType": "RResult<(), RString>",
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "subscribe_to_ext_events",
+          "params": [
+            "sink"
+          ],
+          "returnType": "RResult<(), RString>",
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "configuration_value",
+          "params": [
+            "configuration",
+            "name"
+          ],
+          "returnType": "Option<&'a str>",
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "simulator_parameters",
+          "params": [
+            "configuration"
+          ],
+          "returnType": "Result<EvsParameters, SimError>",
+          "exported": false,
+          "lineCount": 15
+        },
+        {
+          "name": "open",
+          "params": [
+            "configuration"
+          ],
+          "returnType": "Result<Self, SimError>",
+          "exported": false,
+          "lineCount": 24
+        },
+        {
+          "name": "get_width",
+          "params": [],
+          "returnType": "u32",
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "get_height",
+          "params": [],
+          "returnType": "u32",
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "serial",
+          "params": [],
+          "returnType": "RString",
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "connection_type",
+          "params": [],
+          "returnType": "ConnectionType",
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "geometry",
+          "params": [],
+          "returnType": "PluginGeometry",
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "get_facilities",
+          "params": [],
+          "returnType": "RVec<PluginFacilityType>",
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "get_facility",
+          "params": [
+            "facility_type"
+          ],
+          "returnType": "ROption<PluginFacility>",
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "get_facility_handle",
+          "params": [
+            "facility_type"
+          ],
+          "returnType": "ROption<PluginFacilityHandle>",
+          "exported": false,
+          "lineCount": 36
+        },
+        {
+          "name": "start_events",
+          "params": [
+            "sink"
+          ],
+          "returnType": "RResult<(), RString>",
+          "exported": false,
+          "lineCount": 10
+        },
+        {
+          "name": "start_external_triggers",
+          "params": [
+            "sink"
+          ],
+          "returnType": "RResult<(), RString>",
+          "exported": false,
+          "lineCount": 10
+        },
+        {
+          "name": "load_batch",
+          "params": [],
+          "returnType": "RResult<(), RString>",
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "discover",
+          "params": [],
+          "returnType": "RVec<PluginCameraDescriptionAbi>",
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "configuration_schema",
+          "params": [],
+          "returnType": "RString",
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "open_device",
+          "params": [
+            "_serial"
+          ],
+          "returnType": "RResult<DevicePluginBox, RString>",
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "open_device_with_configuration",
+          "params": [
+            "configuration"
+          ],
+          "returnType": "RResult<DevicePluginBox, RString>",
+          "exported": false,
+          "lineCount": 16
+        },
+        {
+          "name": "simulator_plugin_name",
+          "params": [],
+          "returnType": "RString",
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "create_simulator_discovery",
+          "params": [],
+          "returnType": "DeviceDiscoveryPluginBox",
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "instantiate_root_module",
+          "params": [],
+          "returnType": "DevicePluginModuleRef",
+          "exported": true,
+          "lineCount": 7
+        }
+      ],
+      "classes": [
+        {
+          "name": "SimulatorGeometryFacility",
+          "methods": [
+            "get_width",
+            "get_height"
+          ],
+          "properties": [
+            "width",
+            "height"
+          ],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "VideoSimulator",
+          "methods": [
+            "open",
+            "next_frame_events",
+            "next_events_batch",
+            "process_frame"
+          ],
+          "properties": [
+            "input",
+            "decoder",
+            "scaler",
+            "video_stream_index",
+            "width",
+            "height",
+            "fps",
+            "frame_index",
+            "packet_pending",
+            "eof_sent",
+            "rgb",
+            "photocurrents",
+            "simulator"
+          ],
+          "exported": false,
+          "lineCount": 15
+        },
+        {
+          "name": "SimulatorState",
+          "methods": [
+            "advance"
+          ],
+          "properties": [
+            "started",
+            "simulator",
+            "cd_sinks",
+            "ext_sinks"
+          ],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "SimulatorDevice",
+          "methods": [
+            "open",
+            "serial",
+            "connection_type",
+            "geometry",
+            "get_facilities",
+            "get_facility",
+            "get_facility_handle",
+            "start_events",
+            "start_external_triggers",
+            "load_batch"
+          ],
+          "properties": [
+            "state",
+            "width",
+            "height"
+          ],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "SimulatorStreamFacility",
+          "methods": [
+            "request",
+            "start",
+            "stop",
+            "poll_buffer",
+            "wait_next_buffer"
+          ],
+          "properties": [
+            "state"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "SimulatorEventSubscription",
+          "methods": [
+            "subscribe_to_cd_events",
+            "subscribe_to_ext_events"
+          ],
+          "properties": [
+            "state"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "SimulatorDiscovery",
+          "methods": [
+            "discover",
+            "configuration_schema",
+            "open_device",
+            "open_device_with_configuration"
+          ],
+          "properties": [],
+          "exported": false,
+          "lineCount": 1
+        }
+      ],
+      "imports": [
+        {
+          "source": "crate::simulator::error",
+          "specifiers": [
+            "SimError"
+          ]
+        },
+        {
+          "source": "crate::simulator::solver",
+          "specifiers": [
+            "EvsParameters",
+            "EvsSimulator"
+          ]
+        },
+        {
+          "source": "abi_stable::prefix_type",
+          "specifiers": [
+            "PrefixTypeTrait"
+          ]
+        },
+        {
+          "source": "abi_stable::std_types",
+          "specifiers": [
+            "ROption",
+            "RResult",
+            "RString",
+            "RVec"
+          ]
+        },
+        {
+          "source": "abi_stable::type_level::downcasting",
+          "specifiers": [
+            "TD_Opaque"
+          ]
+        },
+        {
+          "source": "ffmpeg_next",
+          "specifiers": [
+            "codec"
+          ]
+        },
+        {
+          "source": "ffmpeg_next::format",
+          "specifiers": [
+            "self",
+            "Pixel"
+          ]
+        },
+        {
+          "source": "ffmpeg_next::software::scaling",
+          "specifiers": [
+            "context::Context",
+            "flag::Flags"
+          ]
+        },
+        {
+          "source": "ffmpeg_next::util::error",
+          "specifiers": [
+            "EAGAIN"
+          ]
+        },
+        {
+          "source": "ffmpeg_next::util::frame::video",
+          "specifiers": [
+            "Video"
+          ]
+        },
+        {
+          "source": "openevt::hal::device::configuration",
+          "specifiers": [
+            "PluginConfigurationSchema"
+          ]
+        },
+        {
+          "source": "openevt::hal::device::discovery",
+          "specifiers": [
+            "ConnectionType"
+          ]
+        },
+        {
+          "source": "openevt::hal::device::plugin",
+          "specifiers": [
+            "self",
+            "DeviceDiscoveryPlugin",
+            "DeviceDiscoveryPlugin_TO",
+            "DeviceDiscoveryPluginBox",
+            "DevicePlugin_TO",
+            "DevicePluginBox",
+            "DevicePluginModuleRef",
+            "DevicePluginModuleVtable",
+            "EventBatchSinkBox",
+            "PluginCameraDescriptionAbi",
+            "PluginConfiguration",
+            "PluginEventSubscriptionFacility",
+            "PluginEventSubscriptionFacility_TO",
+            "PluginFacility",
+            "PluginFacilityHandle",
+            "PluginFacilityType",
+            "PluginGeometry",
+            "PluginGeometryFacility",
+            "PluginGeometryFacility_TO",
+            "PluginRawEventStreamFacility",
+            "PluginRawEventStreamFacility_TO",
+            "PluginStreamBuffer"
+          ]
+        },
+        {
+          "source": "openevt::types",
+          "specifiers": [
+            "EventCD"
+          ]
+        },
+        {
+          "source": "std",
+          "specifiers": [
+            "fs"
+          ]
+        },
+        {
+          "source": "std::sync",
+          "specifiers": [
+            "Arc",
+            "Mutex"
+          ]
+        }
+      ],
+      "exports": [
+        "instantiate_root_module"
+      ],
+      "totalLines": 694,
+      "hasStructuralAnalysis": true
+    },
+    "../Cargo.toml": {
+      "filePath": "../Cargo.toml",
+      "contentHash": "7ef12bed8b69ea2c9bddb529f257b39ee484437a40ce84f960555d8ea2a81b70",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 49,
+      "hasStructuralAnalysis": true
+    },
+    "../README.md": {
+      "filePath": "../README.md",
+      "contentHash": "05106e9a02d8ec7cf5cdbe7c22d19005181161c5a658a92097862828383f8a41",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 103,
+      "hasStructuralAnalysis": true
+    }
+  }
+}

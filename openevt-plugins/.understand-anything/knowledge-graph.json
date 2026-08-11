@@ -1,0 +1,69 @@
+{
+  "version": "1.0.0",
+  "kind": "codebase",
+  "project": {
+    "name": "openevt-plugins",
+    "languages": ["Rust", "TOML", "Markdown"],
+    "frameworks": ["FFmpeg", "abi_stable"],
+    "description": "A Rust dynamic plugin crate for openevt that turns video frames into simulated event-camera CD events and exposes them through the openevt device-plugin ABI.",
+    "analyzedAt": "2026-08-11T18:30:00Z",
+    "gitCommitHash": "212ac8709bc178b68334e06ae9df335041a7e8e5"
+  },
+  "nodes": [
+    {"id":"config:Cargo.toml","type":"config","name":"Plugin Cargo manifest","filePath":"Cargo.toml","summary":"Defines the openevt-plugins package, cdylib/rlib outputs, FFmpeg and serialization dependencies, and the path dependency on the parent openevt crate.","tags":["cargo","dependencies","build-config"],"complexity":"simple"},
+    {"id":"config:../Cargo.toml","type":"config","name":"openevt workspace manifest","filePath":"../Cargo.toml","summary":"Parent workspace and openevt crate manifest. It defines the host ABI, feature flags, and shared types consumed by this plugin.","tags":["parent-crate","workspace","abi"],"complexity":"moderate"},
+    {"id":"document:../README.md","type":"document","name":"openevt README","filePath":"../README.md","summary":"Documents the parent crate’s HAL, plugin runtime flow, OPENEVT_PLUGIN_PATH discovery, and plugin development model.","tags":["parent-crate","documentation","runtime-flow"],"complexity":"simple"},
+    {"id":"file:src/lib.rs","type":"file","name":"Plugin library root","filePath":"src/lib.rs","summary":"Crate root that publicly exposes the simulator module.","tags":["rust","crate-root","public-api"],"complexity":"simple"},
+    {"id":"file:src/simulator/mod.rs","type":"file","name":"Simulator module","filePath":"src/simulator/mod.rs","summary":"Module boundary exporting simulator error, plugin adapter, and numerical solver components.","tags":["rust","module","composition"],"complexity":"simple"},
+    {"id":"file:src/simulator/error.rs","type":"file","name":"Simulator errors","filePath":"src/simulator/error.rs","summary":"Defines SimError conversions for I/O, TOML, FFmpeg, and invalid simulator configuration failures.","tags":["rust","errors","configuration"],"complexity":"simple"},
+    {"id":"file:src/simulator/solver.rs","type":"file","name":"EVS numerical solver","filePath":"src/simulator/solver.rs","summary":"Implements the stateful event-vision-sensor model: parameter validation, deterministic noise, Forward-Euler integration, and ON/OFF event generation.","tags":["rust","simulation","numerical-model","forward-euler"],"complexity":"complex"},
+    {"id":"file:src/simulator/plugin.rs","type":"file","name":"Video simulator plugin adapter","filePath":"src/simulator/plugin.rs","summary":"Loads and decodes video with FFmpeg, converts frames to photocurrents, feeds the solver, and exposes discovery, geometry, streaming, and event-subscription facilities through the parent ABI.","tags":["rust","plugin","ffmpeg","abi","device-adapter"],"complexity":"complex"},
+    {"id":"function:solver:EvsParameters::validate","type":"function","name":"EvsParameters::validate","filePath":"src/simulator/solver.rs","lineRange":[80,124],"summary":"Checks finiteness, positivity, non-negativity, and timestep constraints for physical and numerical parameters.","tags":["validation","configuration"],"complexity":"moderate"},
+    {"id":"function:solver:EvsSimulator::process_frame_over_interval","type":"function","name":"EvsSimulator::process_frame_over_interval","filePath":"src/simulator/solver.rs","lineRange":[206,225],"summary":"Upsamples a video frame interval into numerical timesteps and aggregates generated events.","tags":["simulation","time-integration"],"complexity":"moderate"},
+    {"id":"function:solver:step_forward_euler","type":"function","name":"step_forward_euler","filePath":"src/simulator/solver.rs","lineRange":[269,350],"summary":"Runs one sensor-array Forward-Euler step, updates amplifier/noise state, and emits threshold-crossing ON/OFF events.","tags":["simulation","forward-euler","event-generation"],"complexity":"complex"},
+    {"id":"function:plugin:VideoSimulator::open","type":"function","name":"VideoSimulator::open","filePath":"src/simulator/plugin.rs","lineRange":[86,144],"summary":"Initializes FFmpeg, validates parameters, opens the best video stream, configures decoding and RGB scaling, and creates the EVS solver.","tags":["ffmpeg","initialization","resource-loading"],"complexity":"complex"},
+    {"id":"function:plugin:VideoSimulator::process_frame","type":"function","name":"VideoSimulator::process_frame","filePath":"src/simulator/plugin.rs","lineRange":[198,241],"summary":"Scales a decoded frame to RGB, computes luminance photocurrents, advances the solver, and maps events to EventCD coordinates.","tags":["ffmpeg","pixel-processing","event-generation"],"complexity":"complex"},
+    {"id":"function:plugin:SimulatorState::advance","type":"function","name":"SimulatorState::advance","filePath":"src/simulator/plugin.rs","lineRange":[252,284],"summary":"Advances one frame batch under the shared mutex and dispatches CD and external-trigger callbacks to subscribers.","tags":["streaming","concurrency","callbacks"],"complexity":"complex"},
+    {"id":"function:plugin:SimulatorDevice::open","type":"function","name":"SimulatorDevice::open","filePath":"src/simulator/plugin.rs","lineRange":[391,414],"summary":"Reads plugin configuration, loads simulator parameters, opens the video backend, and creates shared simulator state.","tags":["configuration","device","initialization"],"complexity":"moderate"},
+    {"id":"function:plugin:SimulatorDiscovery::open_device_with_configuration","type":"function","name":"SimulatorDiscovery::open_device_with_configuration","filePath":"src/simulator/plugin.rs","lineRange":[596,617],"summary":"Validates the raw simulator schema and constructs an ABI-erased simulator device from configuration.","tags":["discovery","configuration","abi"],"complexity":"moderate"},
+    {"id":"function:plugin:instantiate_root_module","type":"function","name":"instantiate_root_module","filePath":"src/simulator/plugin.rs","lineRange":[633,640],"summary":"Exports the abi_stable plugin root module with the plugin name and discovery factory.","tags":["abi","plugin-entrypoint","ffi"],"complexity":"moderate"}
+  ],
+  "edges": [
+    {"source":"file:src/lib.rs","target":"file:src/simulator/mod.rs","type":"contains","direction":"forward","description":"The crate root exposes the simulator module.","weight":1},
+    {"source":"file:src/simulator/mod.rs","target":"file:src/simulator/error.rs","type":"contains","direction":"forward","weight":1},
+    {"source":"file:src/simulator/mod.rs","target":"file:src/simulator/plugin.rs","type":"contains","direction":"forward","weight":1},
+    {"source":"file:src/simulator/mod.rs","target":"file:src/simulator/solver.rs","type":"contains","direction":"forward","weight":1},
+    {"source":"config:Cargo.toml","target":"config:../Cargo.toml","type":"depends_on","direction":"forward","description":"The plugin uses the parent package through a path dependency at ../.","weight":1},
+    {"source":"file:src/simulator/plugin.rs","target":"config:../Cargo.toml","type":"imports","direction":"forward","description":"The plugin imports openevt HAL, device-plugin ABI, and EventCD types from the parent crate.","weight":1},
+    {"source":"document:../README.md","target":"file:src/simulator/plugin.rs","type":"documents","direction":"forward","description":"The parent README documents plugin discovery and the simulator plugin runtime flow.","weight":0.9},
+    {"source":"file:src/simulator/plugin.rs","target":"file:src/simulator/error.rs","type":"imports","direction":"forward","weight":0.9},
+    {"source":"file:src/simulator/plugin.rs","target":"file:src/simulator/solver.rs","type":"imports","direction":"forward","weight":1},
+    {"source":"file:src/simulator/plugin.rs","target":"config:Cargo.toml","type":"depends_on","direction":"forward","description":"Uses FFmpeg, abi_stable, serde/TOML-backed configuration, and thiserror dependencies declared by the manifest.","weight":0.9},
+    {"source":"file:src/simulator/solver.rs","target":"config:Cargo.toml","type":"depends_on","direction":"forward","description":"Uses serde derives for simulator parameters.","weight":0.7},
+    {"source":"function:solver:EvsParameters::validate","target":"function:plugin:SimulatorDevice::open","type":"calls","direction":"forward","weight":0.8},
+    {"source":"function:plugin:SimulatorDevice::open","target":"function:plugin:VideoSimulator::open","type":"calls","direction":"forward","weight":1},
+    {"source":"function:plugin:SimulatorDevice::open","target":"function:solver:EvsParameters::validate","type":"calls","direction":"forward","weight":0.8},
+    {"source":"function:plugin:VideoSimulator::open","target":"file:src/simulator/plugin.rs","type":"contains","direction":"backward","weight":1},
+    {"source":"function:plugin:VideoSimulator::process_frame","target":"function:solver:EvsSimulator::process_frame_over_interval","type":"calls","direction":"forward","weight":1},
+    {"source":"function:solver:EvsSimulator::process_frame_over_interval","target":"function:solver:step_forward_euler","type":"calls","direction":"forward","weight":1},
+    {"source":"function:plugin:SimulatorState::advance","target":"function:plugin:VideoSimulator::process_frame","type":"calls","direction":"forward","weight":0.9},
+    {"source":"function:plugin:SimulatorState::advance","target":"file:src/simulator/plugin.rs","type":"publishes","direction":"forward","description":"Dispatches generated CD events and empty external-trigger batches to subscribed sinks.","weight":0.9},
+    {"source":"function:plugin:SimulatorDiscovery::open_device_with_configuration","target":"function:plugin:SimulatorDevice::open","type":"calls","direction":"forward","weight":1},
+    {"source":"function:plugin:instantiate_root_module","target":"function:plugin:SimulatorDiscovery::open_device_with_configuration","type":"calls","direction":"forward","weight":0.9},
+    {"source":"config:Cargo.toml","target":"file:src/simulator/plugin.rs","type":"configures","direction":"forward","weight":0.8},
+    {"source":"file:src/simulator/plugin.rs","target":"file:src/simulator/solver.rs","type":"transforms","direction":"forward","description":"Video RGB luminance is transformed into photocurrent frames consumed by the event-vision solver.","weight":1},
+    {"source":"file:src/simulator/solver.rs","target":"file:src/simulator/plugin.rs","type":"exports","direction":"backward","description":"The solver exports EvsParameters, EvsSimulator, and generated Event values used by the adapter.","weight":0.9}
+  ],
+  "layers": [
+    {"id":"layer:parent-contract","name":"Parent crate contract","description":"The workspace manifest, parent documentation, and public crate root establish how the plugin is built, discovered, and consumed.","nodeIds":["config:../Cargo.toml","document:../README.md","config:Cargo.toml","file:src/lib.rs"]},
+    {"id":"layer:simulation-model","name":"Event-camera simulation model","description":"Numerical state, physical parameters, noise model, validation, and Forward-Euler event generation.","nodeIds":["file:src/simulator/solver.rs","file:src/simulator/error.rs","function:solver:EvsParameters::validate","function:solver:EvsSimulator::process_frame_over_interval","function:solver:step_forward_euler"]},
+    {"id":"layer:plugin-adapter","name":"Video and ABI adapter","description":"FFmpeg video ingestion, pixel conversion, device facilities, streaming callbacks, discovery, and dynamic plugin export.","nodeIds":["file:src/simulator/mod.rs","file:src/simulator/plugin.rs","function:plugin:VideoSimulator::open","function:plugin:VideoSimulator::process_frame","function:plugin:SimulatorState::advance","function:plugin:SimulatorDevice::open","function:plugin:SimulatorDiscovery::open_device_with_configuration","function:plugin:instantiate_root_module"]}
+  ],
+  "tour": [
+    {"order":1,"title":"Start with the parent contract","description":"Read the parent manifest and README to understand the path dependency, feature flags, plugin discovery, and ABI runtime flow.","nodeIds":["config:../Cargo.toml","document:../README.md","config:Cargo.toml"]},
+    {"order":2,"title":"Understand the numerical model","description":"Follow EvsParameters and EvsSimulator through validation, deterministic noise, Forward-Euler integration, and ON/OFF threshold events.","nodeIds":["file:src/simulator/solver.rs","function:solver:EvsParameters::validate","function:solver:EvsSimulator::process_frame_over_interval","function:solver:step_forward_euler"]},
+    {"order":3,"title":"Trace video to events","description":"See how FFmpeg decodes frames, RGB luminance becomes photocurrent, and the solver returns EventCD coordinates and timestamps.","nodeIds":["file:src/simulator/plugin.rs","function:plugin:VideoSimulator::open","function:plugin:VideoSimulator::process_frame"]},
+    {"order":4,"title":"Trace the streaming path","description":"Follow device configuration into shared simulator state, stream requests, mutex-protected frame advancement, and subscriber callbacks.","nodeIds":["function:plugin:SimulatorDevice::open","function:plugin:SimulatorState::advance","file:src/simulator/plugin.rs"]},
+    {"order":5,"title":"Understand dynamic loading","description":"Finish at discovery and instantiate_root_module to see how the simulator becomes an abi_stable device plugin discovered by the parent crate.","nodeIds":["function:plugin:SimulatorDiscovery::open_device_with_configuration","function:plugin:instantiate_root_module","file:src/lib.rs"]}
+  ]
+}

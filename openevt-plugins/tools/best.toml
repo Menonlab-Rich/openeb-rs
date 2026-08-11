@@ -1,0 +1,7 @@
+i_d1_t0 = 0.0902355261
+noise_fe_std = 3.73829151e-05
+noise_o1_std = 0.00099379211
+photocurrent_scale = 0.920402366
+threshold_off = 0.000450237818
+threshold_on = 0.000450237818
+dt = 1e-3

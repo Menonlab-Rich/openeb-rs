@@ -1,0 +1,20 @@
+[build-system]
+requires = ["maturin>=1.8,<2"]
+build-backend = "maturin"
+
+[project]
+name = "openevt-plugins"
+version = "0.1.0"
+description = "Python bindings for the OpenEVT simulator plugin"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.21",
+    "optuna>=4.9.0",
+]
+
+[tool.maturin]
+manifest-path = "../Cargo.toml"
+bindings = "pyo3"
+module-name = "openevt_plugins"
+features = ["python"]

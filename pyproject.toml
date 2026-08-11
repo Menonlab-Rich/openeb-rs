@@ -30,3 +30,8 @@ classifiers = [
 bindings = "pyo3"
 features = ["python"]
 strip = true
+
+[tool.uv.workspace]
+members = [
+    "openevt-plugins/tools",
+]

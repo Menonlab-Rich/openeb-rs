@@ -1,0 +1,35 @@
+# OpenEVT plugin development
+
+OpenEVT plugins are dynamic Rust libraries that connect the host crate to an
+event source or an event visualization pipeline. This book documents the
+contracts in this repository, the ABI rules behind them, and the workflow for
+building a plugin that another OpenEVT application can discover and load.
+
+There are two independent plugin families:
+
+| Plugin | Input | Output | ABI root |
+| --- | --- | --- | --- |
+| Device plugin | A camera, file, simulator, or network source | Device metadata, facilities, and CD/trigger batches | `openevt_device_plugin` |
+| Frame generator | Decoded `EventCD` batches | Caller-owned RGBA image buffers | `frame_generator_plugin` |
+
+Start with [Architecture and mental model](architecture.md), then choose the
+[device plugin](plugin-development-guide.md) or
+[frame-generation plugin](framegen-plugin.md) guide. The
+[video simulator](simulator-plugin.md) is a complete working device plugin
+that is especially useful when implementing a new adapter.
+
+## Repository map
+
+The root `openevt` crate owns the public HAL and both ABI contracts. The
+`openevt-plugins` crate contains a video-backed simulator and optional Python
+bindings. The raw-file device adapter lives in `src/devices/raw/plugin.rs`.
+
+The contracts are deliberately small. Keep vendor SDKs, decoders, threads,
+channels, locks, and mutable buffers inside the plugin; only ABI-safe values
+cross the dynamic-library boundary.
+
+## Compatibility rule
+
+Build the plugin and host against compatible versions of `openevt`,
+`abi_stable`, and the Rust ABI definitions. A plugin is not a generic shared
+object: it must export the exact root-module contract expected by the loader.

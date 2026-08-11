@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.8,<2"]
+build-backend = "maturin"
+
+[project]
+name = "openevt-plugins"
+version = "0.1.0"
+description = "Python bindings for the OpenEVT simulator plugin"
+requires-python = ">=3.9"
+
+[tool.maturin]
+bindings = "pyo3"
+features = ["python"]
+module-name = "openevt_plugins"

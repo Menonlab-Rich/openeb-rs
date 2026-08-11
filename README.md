@@ -15,11 +15,31 @@ openevt = { version = "0.1", features = ["devices"] }
 The `all` feature enables every optional component and is the default feature.
 Use `default-features = false` for a core-only build.
 
+## Documentation
+
+The complete developer documentation is available as a GitBook-style guide in
+[`docs/README.md`](docs/README.md), with navigation in
+[`docs/SUMMARY.md`](docs/SUMMARY.md). It covers architecture, ABI rules,
+plugin lifecycle, configuration schemas, testing, and troubleshooting.
+
+OpenEVT supports two plugin families:
+
+- [Device plugins](docs/plugin-development-guide.md) connect cameras, files,
+  network sources, and simulators to the host layer.
+- [Frame-generation plugins](docs/framegen-plugin.md) consume decoded CD
+  events and render RGBA frames.
+
+The repository includes a [raw-file plugin reference](docs/raw-file-plugin.md)
+and a [video simulator plugin](docs/simulator-plugin.md). See the
+[development workflow](docs/development-workflow.md) for build, discovery,
+testing, and troubleshooting commands.
+
 ## Layout
 
 ```text
 .
 ├── Cargo.toml
+├── docs/        # Plugin development and architecture guides
 └── src/
     ├── hal/       # HAL abstractions, facilities, dispatchers, and decoders
     ├── buffer.rs   # pooled event buffers
