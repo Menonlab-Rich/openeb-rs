@@ -1,7 +1,3 @@
-Here is a complete, polished `README.md` tailored specifically for `openevt-plugins`, highlighting the Linux package manager workflow alongside Windows setup.
-
----
-
 # openevt-plugins
 
 `openevt-plugins` provides dynamic plugin integrations for processing and streaming EVT3 event-based vision data.
