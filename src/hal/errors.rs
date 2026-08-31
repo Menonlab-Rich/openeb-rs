@@ -86,7 +86,7 @@ pub enum DecoderError {
     #[error("Protocol violation: {0}")]
     ProtocolViolation(#[from] DecoderProtocolViolation),
     #[error("Corrupt frame at offset {offset}")]
-    CorruptFrame { offset: usize },
+    CorruptFrame { offset: u64 },
     #[error("Stream read failure: {0}")]
     StreamError(#[from] StreamError),
     #[error("HAL status error: {0}")]

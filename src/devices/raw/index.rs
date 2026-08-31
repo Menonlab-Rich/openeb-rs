@@ -6,7 +6,7 @@
 
 use crate::raw::decoder::RawEventStreamDecoder;
 use crate::raw::stream::RawEventStream;
-use crate::types::{DeviceFileError, FileIndex, IndexMarker};
+use crate::types::{DeviceFileError, EventTimestamp, FileIndex, IndexMarker};
 use openevt_core::hal::decoders::evt3::Evt3Decoder;
 use openevt_core::hal::facilities::RawEventStreamDecoderFacility;
 use std::io::{Read, Seek, SeekFrom};
@@ -86,7 +86,7 @@ pub(crate) fn build_index(
 /// Seeks the stream and decoder to the closest indexed position at or before `target_timestamp`.
 pub(crate) fn seek_to_timestamp<const N: usize>(
     index: &FileIndex,
-    target_timestamp: usize,
+    target_timestamp: EventTimestamp,
     stream: &mut RawEventStream<N>,
     decoder: &mut RawEventStreamDecoder,
 ) -> Result<(), DeviceFileError> {

@@ -5,7 +5,9 @@
 
 use crossbeam::channel::TryRecvError;
 
-pub use openevt_core::hal::types::{EventCD, EventExtTrigger};
+pub use openevt_core::hal::types::{
+    EventCD, EventCoordinate, EventCount, EventExtTrigger, EventId, EventTimestamp,
+};
 use openevt_core::hal::{
     decoders::evt3::{DecoderTimingState, Evt3Decoder},
     facilities::{self, FacilityError},
@@ -166,7 +168,7 @@ pub struct IndexMarker {
     /// Byte offset at which decoding can resume.
     pub byte_offset: u64,
     /// Timestamp represented by this marker.
-    pub timestamp: usize,
+    pub timestamp: EventTimestamp,
     /// Decoder timing state at the marker.
     pub state: DecoderTimingState,
 }
@@ -179,16 +181,16 @@ pub struct IndexMarker {
 #[derive(Clone, Debug, Default)]
 pub struct FileIndex {
     /// Earliest timestamp in the indexed file.
-    pub t_min: usize,
+    pub t_min: EventTimestamp,
     /// Latest timestamp in the indexed file.
-    pub t_max: usize,
+    pub t_max: EventTimestamp,
     /// Sorted seek markers sampled from the file.
     pub markers: Vec<IndexMarker>,
 }
 
 impl FileIndex {
     /// Returns the closest marker occurring before or at `target_ts`.
-    pub fn find_closest_marker(&self, target_ts: usize) -> Option<&IndexMarker> {
+    pub fn find_closest_marker(&self, target_ts: EventTimestamp) -> Option<&IndexMarker> {
         if self.markers.is_empty() {
             return None;
         }

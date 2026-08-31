@@ -2,6 +2,19 @@
 
 use crate::new;
 
+/// Fixed-width scalar used for decoded event coordinates.
+pub type EventCoordinate = u64;
+/// Fixed-width scalar used for event timestamps in device time units.
+pub type EventTimestamp = u64;
+/// Fixed-width scalar used for decoded event identifiers.
+pub type EventId = u64;
+/// Fixed-width scalar used for callback registration identifiers.
+pub type CallbackId = u64;
+/// Fixed-width scalar used for byte counts crossing public/plugin APIs.
+pub type StreamLength = u64;
+/// Fixed-width scalar used for event counts crossing public APIs.
+pub type EventCount = u64;
+
 #[cfg_attr(
     any(feature = "framegen", feature = "plugins"),
     derive(abi_stable::StableAbi)
@@ -11,13 +24,13 @@ use crate::new;
 /// A decoded change-detection event.
 pub struct EventCD {
     /// Horizontal pixel coordinate.
-    pub x: usize,
+    pub x: EventCoordinate,
     /// Vertical pixel coordinate.
-    pub y: usize,
+    pub y: EventCoordinate,
     /// Polarity of the change.
     pub p: bool,
     /// Event timestamp in device time units.
-    pub t: usize,
+    pub t: EventTimestamp,
 }
 
 #[cfg_attr(feature = "plugins", derive(abi_stable::StableAbi))]
@@ -28,9 +41,9 @@ pub struct EventExtTrigger {
     /// Trigger polarity.
     pub p: bool,
     /// Event timestamp in device time units.
-    pub t: usize,
+    pub t: EventTimestamp,
     /// Trigger identifier.
-    pub id: usize,
+    pub id: EventId,
 }
 
 /// Callback that may mutate captured state.

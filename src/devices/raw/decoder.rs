@@ -3,9 +3,10 @@ use crate::types::FileFormat;
 use openevt_core::hal::decoders::evt3::{DecoderTimingState, Evt3Decoder};
 use openevt_core::hal::decoders::raw_fmt_decoder::RawFormatDecoder;
 use openevt_core::hal::facilities::{
-    RawDecoderFacility, DecoderErrorCallback, EventCDCallback, EventSubscriptionFacility,
-    EventExtTriggerCallback, RawEventStreamDecoderFacility, FacilityError, FacilityResult,
+    DecoderErrorCallback, EventCDCallback, EventExtTriggerCallback, EventSubscriptionFacility,
+    FacilityError, FacilityResult, RawDecoderFacility, RawEventStreamDecoderFacility,
 };
+use openevt_core::hal::types::EventTimestamp;
 use std::sync::{Arc, RwLock};
 
 #[derive(Clone)]
@@ -65,7 +66,10 @@ impl EventSubscriptionFacility for RawEventStreamDecoder {
     }
 
     fn subscribe_to_ext_events(&mut self, callback: EventExtTriggerCallback) -> FacilityResult<()> {
-        self.inner.write().unwrap().subscribe_to_ext_events(callback)
+        self.inner
+            .write()
+            .unwrap()
+            .subscribe_to_ext_events(callback)
     }
 }
 
@@ -74,11 +78,11 @@ impl RawEventStreamDecoderFacility for RawEventStreamDecoder {
         self.inner.write().unwrap().decode(raw_data)
     }
 
-    fn get_last_timestamp(&self) -> usize {
+    fn get_last_timestamp(&self) -> EventTimestamp {
         self.inner.read().unwrap().get_last_timestamp()
     }
 
-    fn get_timestamp_shift(&self) -> Option<usize> {
+    fn get_timestamp_shift(&self) -> Option<EventTimestamp> {
         self.inner.read().unwrap().get_timestamp_shift()
     }
 
@@ -86,11 +90,11 @@ impl RawEventStreamDecoderFacility for RawEventStreamDecoder {
         self.inner.read().unwrap().is_time_shifting_enabled()
     }
 
-    fn reset_last_timestamp(&mut self, timestamp: usize) {
+    fn reset_last_timestamp(&mut self, timestamp: EventTimestamp) {
         self.inner.write().unwrap().reset_last_timestamp(timestamp)
     }
 
-    fn reset_timestamp_shift(&mut self, shift: usize) {
+    fn reset_timestamp_shift(&mut self, shift: EventTimestamp) {
         self.inner.write().unwrap().reset_timestamp_shift(shift)
     }
 
@@ -103,7 +107,10 @@ impl RawEventStreamDecoderFacility for RawEventStreamDecoder {
 }
 
 impl RawDecoderFacility for RawEventStreamDecoder {
-    fn subscribe_to_protocol_violation(&mut self, callback: DecoderErrorCallback) -> FacilityResult<()> {
+    fn subscribe_to_protocol_violation(
+        &mut self,
+        callback: DecoderErrorCallback,
+    ) -> FacilityResult<()> {
         self.inner
             .write()
             .unwrap()

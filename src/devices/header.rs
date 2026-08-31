@@ -189,7 +189,8 @@ mod tests {
 
         assert_eq!((header.width, header.height), (2, 3));
         assert_eq!(reader.position(), b"%Geometry: 2,3\n".len() as u64);
-        assert_eq!(&reader.get_ref()[reader.position() as usize..], &[1, 2]);
+        let position = reader.position().try_into().unwrap();
+        assert_eq!(&reader.get_ref()[position..], &[1, 2]);
     }
 
     #[test]

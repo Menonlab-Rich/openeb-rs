@@ -211,25 +211,25 @@ fn stream_requires_start_and_reports_eof_until_repositioned() -> TestResult {
 fn sync_iterator_caps_batches_and_preserves_leftovers() -> TestResult {
     let (sender, receiver) = crossbeam::channel::unbounded();
     let events = vec![
-            EventCD {
-                x: 1,
-                y: 2,
-                p: true,
-                t: 10,
-            },
-            EventCD {
-                x: 3,
-                y: 4,
-                p: false,
-                t: 11,
-            },
-            EventCD {
-                x: 5,
-                y: 6,
-                p: true,
-                t: 12,
-            },
-        ];
+        EventCD {
+            x: 1,
+            y: 2,
+            p: true,
+            t: 10,
+        },
+        EventCD {
+            x: 3,
+            y: 4,
+            p: false,
+            t: 11,
+        },
+        EventCD {
+            x: 5,
+            y: 6,
+            p: true,
+            t: 12,
+        },
+    ];
     sender.send(events)?;
     drop(sender);
 
@@ -238,15 +238,17 @@ fn sync_iterator_caps_batches_and_preserves_leftovers() -> TestResult {
     ));
     let decoder: Arc<
         RwLock<dyn openevt_core::hal::facilities::RawEventStreamDecoderFacility + Send>,
-    > = Arc::new(RwLock::new(crate::raw::decoder::RawEventStreamDecoder::new(
-        &crate::header::Header {
-            format: crate::types::FileFormat::EVT3,
-            width: 1280,
-            height: 720,
-            metadata: Default::default(),
-        },
-        true,
-    )));
+    > = Arc::new(RwLock::new(
+        crate::raw::decoder::RawEventStreamDecoder::new(
+            &crate::header::Header {
+                format: crate::types::FileFormat::EVT3,
+                width: 1280,
+                height: 720,
+                metadata: Default::default(),
+            },
+            true,
+        ),
+    ));
     let mut iter =
         super::iterator::EventWindowIterator::<2>::new(receiver, (720, 1280), stream, decoder)
             .into_async();

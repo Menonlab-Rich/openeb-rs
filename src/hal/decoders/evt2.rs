@@ -8,10 +8,10 @@ use std::sync::Arc;
 
 use crate::hal::dispatcher::{ErrorDispatcher, EventDispatcher};
 use crate::hal::facilities::{
-    RawDecoderFacility, DecoderErrorCallback, EventCDCallback, EventSubscriptionFacility,
-    EventExtTriggerCallback, RawEventStreamDecoderFacility, FacilityResult,
+    DecoderErrorCallback, EventCDCallback, EventExtTriggerCallback, EventSubscriptionFacility,
+    FacilityResult, RawDecoderFacility, RawEventStreamDecoderFacility,
 };
-use crate::hal::types::{EventCD, EventExtTrigger};
+use crate::hal::types::{EventCD, EventExtTrigger, EventTimestamp};
 
 /// Decoder for EVT2 raw event streams.
 pub struct Evt2Decoder {
@@ -21,8 +21,8 @@ pub struct Evt2Decoder {
     pub err_dispatcher: Arc<ErrorDispatcher>,
 
     // Time tracking
-    first_ts: Option<usize>,
-    last_t: usize,
+    first_ts: Option<EventTimestamp>,
+    last_t: EventTimestamp,
     time_high: u32,
     /// Whether timestamps are shifted to begin at zero.
     pub do_time_shift: bool,
@@ -37,7 +37,6 @@ pub struct Evt2Decoder {
     split_bytes: Vec<u8>,
     cd_buffer: Vec<EventCD>,
     ext_trigger_buffer: Vec<EventExtTrigger>,
-
 }
 
 impl Evt2Decoder {
@@ -69,9 +68,9 @@ impl Evt2Decoder {
 
     #[inline(always)]
     /// Reconstructs the current EVT2 timestamp from the stored high bits.
-    fn current_timestamp(&mut self, time_low: u32) -> usize {
+    fn current_timestamp(&mut self, time_low: u32) -> EventTimestamp {
         // Concatenate the 28-bit time_high with the 6-bit time_low
-        let abs_ts = ((self.time_high as usize) << 6) | (time_low as usize);
+        let abs_ts = (u64::from(self.time_high) << 6) | u64::from(time_low);
 
         if self.do_time_shift {
             let first = *self.first_ts.get_or_insert(abs_ts);
@@ -101,7 +100,7 @@ impl Evt2Decoder {
                 if x <= self.max_x as u32 && y <= self.max_y as u32 {
                     let t = self.current_timestamp(time_low);
                     self.cd_buffer
-                        .push(EventCD::new(x as usize, y as usize, p, t));
+                        .push(EventCD::new(u64::from(x), u64::from(y), p, t));
                 }
             }
             0x8 => {
@@ -116,7 +115,7 @@ impl Evt2Decoder {
                 let t = self.current_timestamp(time_low);
 
                 self.ext_trigger_buffer
-                    .push(EventExtTrigger::new(value, t, id as usize));
+                    .push(EventExtTrigger::new(value, t, u64::from(id)));
             }
             _ => {
                 // 0xE (OTHERS) and 0xF (CONTINUED) are vendor-specific and ignored by default
@@ -186,12 +185,12 @@ impl RawEventStreamDecoderFacility for Evt2Decoder {
     }
 
     /// Returns the last timestamp emitted by the decoder.
-    fn get_last_timestamp(&self) -> usize {
+    fn get_last_timestamp(&self) -> EventTimestamp {
         self.last_t
     }
 
     /// Returns the current timestamp shift, if one has been established.
-    fn get_timestamp_shift(&self) -> Option<usize> {
+    fn get_timestamp_shift(&self) -> Option<EventTimestamp> {
         self.first_ts
     }
 
@@ -201,12 +200,12 @@ impl RawEventStreamDecoderFacility for Evt2Decoder {
     }
 
     /// Updates the last decoded timestamp.
-    fn reset_last_timestamp(&mut self, timestamp: usize) {
+    fn reset_last_timestamp(&mut self, timestamp: EventTimestamp) {
         self.last_t = timestamp;
     }
 
     /// Updates the timestamp shift baseline.
-    fn reset_timestamp_shift(&mut self, shift: usize) {
+    fn reset_timestamp_shift(&mut self, shift: EventTimestamp) {
         self.first_ts = Some(shift);
     }
 
@@ -218,8 +217,12 @@ impl RawEventStreamDecoderFacility for Evt2Decoder {
 
 impl RawDecoderFacility for Evt2Decoder {
     /// Subscribes to decoder protocol violation errors.
-    fn subscribe_to_protocol_violation(&mut self, callback: DecoderErrorCallback) -> FacilityResult<()> {
-        self.err_dispatcher.subscribe::<crate::hal::errors::DecoderProtocolViolation>(callback);
+    fn subscribe_to_protocol_violation(
+        &mut self,
+        callback: DecoderErrorCallback,
+    ) -> FacilityResult<()> {
+        self.err_dispatcher
+            .subscribe::<crate::hal::errors::DecoderProtocolViolation>(callback);
         Ok(())
     }
 

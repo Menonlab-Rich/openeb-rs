@@ -69,13 +69,14 @@ def test_sync_iterator_is_pythonic_and_returns_structured_numpy(openevt):
     batch = next(iterator)
     assert isinstance(batch, np.ndarray)
     assert batch.dtype.names == ("x", "y", "p", "t")
-    assert batch.dtype.itemsize == 16
+    assert batch.dtype.itemsize == 32
     assert batch.dtype.fields["x"][1] == 0
-    assert batch.dtype.fields["y"][1] == 2
-    assert batch.dtype.fields["p"][1] == 4
-    assert batch.dtype.fields["t"][1] == 8
+    assert batch.dtype.fields["y"][1] == 8
+    assert batch.dtype.fields["p"][1] == 16
+    assert batch.dtype.fields["t"][1] == 24
     assert batch.size > 0
-    assert batch["x"].dtype == np.dtype("u2")
+    assert batch["x"].dtype == np.dtype("u8")
+    assert batch["y"].dtype == np.dtype("u8")
     assert batch["p"].dtype == np.dtype("u1")
     assert batch["t"].dtype == np.dtype("u8")
 

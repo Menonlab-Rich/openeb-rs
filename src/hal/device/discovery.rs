@@ -116,7 +116,7 @@ impl PluginRegistry {
     /// Loads every ABI-compatible library found in the configured directories.
     /// Invalid or unrelated shared libraries are skipped, allowing a directory
     /// to contain other vendor libraries.
-    pub fn load_default_paths(&mut self) -> usize {
+    pub fn load_default_paths(&mut self) -> u64 {
         let mut loaded = 0;
         for directory in default_plugin_paths() {
             loaded += self.load_directory(&directory);
@@ -128,7 +128,7 @@ impl PluginRegistry {
     ///
     /// Returns the number of libraries successfully loaded. Missing
     /// directories and individual load failures are ignored.
-    pub fn load_directory(&mut self, directory: &Path) -> usize {
+    pub fn load_directory(&mut self, directory: &Path) -> u64 {
         let Ok(entries) = fs::read_dir(directory) else {
             return 0;
         };
@@ -137,7 +137,7 @@ impl PluginRegistry {
             .map(|entry| entry.path())
             .filter(|path| is_library(path))
             .filter_map(|path| self.load_file(&path).ok())
-            .count()
+            .count() as u64
     }
 
     /// Loads one plugin library and registers its discovery interface.
@@ -207,9 +207,7 @@ impl PluginRegistry {
         &self,
         serial: &str,
     ) -> Result<super::plugin::PluginConfiguration, String> {
-        Ok(self
-            .configuration_schema(serial)?
-            .new_configuration(serial))
+        Ok(self.configuration_schema(serial)?.new_configuration(serial))
     }
 
     /// Opens a discovered device with a host-layer-populated configuration.
@@ -246,7 +244,8 @@ impl PluginRegistry {
         &self,
         configuration: super::plugin::PluginConfiguration,
     ) -> Result<super::device::HostPluginDevice, String> {
-        self.open_device_with_configuration(configuration).map(Into::into)
+        self.open_device_with_configuration(configuration)
+            .map(Into::into)
     }
 
     /// Opens a plugin device through the ordinary host-layer

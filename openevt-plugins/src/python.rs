@@ -1,5 +1,6 @@
 use crate::simulator::plugin::VideoSimulator;
 use crate::simulator::solver::EvsParameters;
+use openevt::types::EventTimestamp;
 use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
 
@@ -15,12 +16,16 @@ impl Simulator {
     fn new(
         video_path: String,
         config_toml: Option<String>,
-        width: usize,
-        height: usize,
+        width: u64,
+        height: u64,
     ) -> PyResult<Self> {
         if width == 0 || height == 0 {
             return Err(PyValueError::new_err("width and height must be positive"));
         }
+        let width = usize::try_from(width)
+            .map_err(|_| PyValueError::new_err("width is too large for this platform"))?;
+        let height = usize::try_from(height)
+            .map_err(|_| PyValueError::new_err("height is too large for this platform"))?;
         let params = match config_toml {
             Some(source) => toml::from_str::<EvsParameters>(&source)
                 .map_err(|error| PyValueError::new_err(error.to_string()))?,
@@ -32,7 +37,7 @@ impl Simulator {
     }
 
     /// Simulate and return one decoded frame as (x, y, polarity, timestamp).
-    fn next_batch(&mut self) -> PyResult<Vec<(usize, usize, bool, usize)>> {
+    fn next_batch(&mut self) -> PyResult<Vec<(u64, u64, bool, EventTimestamp)>> {
         let events = self
             .inner
             .next_events_batch()
@@ -44,12 +49,12 @@ impl Simulator {
             .collect())
     }
 
-    fn seek(&mut self, timestamp: u32) -> PyResult<()> {
+    fn seek(&mut self, timestamp: EventTimestamp) -> PyResult<()> {
         self.inner.seek(timestamp).map_err(PyIOError::new_err)
     }
 
     #[getter]
-    fn t_max(&self) -> usize {
+    fn t_max(&self) -> EventTimestamp {
         self.inner.duration_us
     }
 }

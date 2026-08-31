@@ -23,7 +23,7 @@ use openevt::hal::device::plugin::{
     PluginRawEventStreamFacility, PluginRawEventStreamFacility_TO, PluginSeekFacility,
     PluginSeekFacility_TO, PluginStreamBuffer,
 };
-use openevt::types::EventCD;
+use openevt::types::{EventCD, EventTimestamp};
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{RecvTimeoutError, sync_channel};
@@ -102,8 +102,8 @@ pub(crate) struct VideoSimulator {
     width: usize,
     height: usize,
     fps: f64,
-    pub(crate) duration_us: usize,
-    frame_count: usize,
+    pub(crate) duration_us: EventTimestamp,
+    frame_count: u64,
     photocurrent_scale: f32,
     frame_index: u64,
     packet_pending: bool,
@@ -146,14 +146,14 @@ impl VideoSimulator {
         let duration_us = if stream.duration() > 0 && stream_time_base.denominator() != 0 {
             (stream.duration() as f64 * f64::from(stream_time_base.numerator())
                 / f64::from(stream_time_base.denominator())
-                * 1_000_000.0) as usize
+                * 1_000_000.0) as EventTimestamp
         } else {
-            input.duration().max(0) as usize
+            input.duration().max(0) as EventTimestamp
         };
         let frame_count = if stream.frames() > 0 {
-            stream.frames() as usize
+            stream.frames() as u64
         } else {
-            (duration_us as f64 * fps / 1_000_000.0).ceil() as usize
+            (duration_us as f64 * fps / 1_000_000.0).ceil() as u64
         };
 
         let context_decoder = codec::context::Context::from_parameters(stream.parameters())
@@ -193,15 +193,15 @@ impl VideoSimulator {
             eof_sent: false,
             rgb: Video::empty(),
             photocurrents: Vec::with_capacity(output_width * output_height),
-            simulator: EvsSimulator::new(output_width * output_height, params)
+            simulator: EvsSimulator::new((output_width as u64) * (output_height as u64), params)
                 .map_err(|error| error.to_string())?,
         })
     }
 
-    pub(crate) fn seek(&mut self, timestamp_us: u32) -> Result<(), String> {
-        let target = (timestamp_us as usize).min(self.duration_us);
+    pub(crate) fn seek(&mut self, timestamp_us: EventTimestamp) -> Result<(), String> {
+        let target = timestamp_us.min(self.duration_us);
         let target_frame =
-            ((target as f64 * self.fps / 1_000_000.0).floor() as usize).min(self.frame_count);
+            ((target as f64 * self.fps / 1_000_000.0).floor() as u64).min(self.frame_count);
 
         // Decode forward from the beginning so the frame index and simulator
         // state exactly match the requested video frame. FFmpeg keyframe seeks
@@ -214,7 +214,7 @@ impl VideoSimulator {
         self.frame_index = 0;
         self.simulator.reset();
 
-        while self.frame_index < target_frame as u64 {
+        while self.frame_index < target_frame {
             if self.next_frame_events()?.is_none() {
                 break;
             }
@@ -314,11 +314,15 @@ impl VideoSimulator {
 
         Ok(generated
             .into_iter()
-            .map(|event| EventCD {
-                x: event.pixel_index % self.width,
-                y: event.pixel_index / self.width,
-                p: event.polarity,
-                t: event.timestamp.max(0.0) as usize,
+            .map(|event| {
+                let pixel_index = usize::try_from(event.pixel_index)
+                    .expect("simulator emitted a pixel index that does not fit this platform");
+                EventCD {
+                    x: (pixel_index % self.width) as u64,
+                    y: (pixel_index / self.width) as u64,
+                    p: event.polarity,
+                    t: event.timestamp.max(0.0) as EventTimestamp,
+                }
             })
             .collect())
     }
@@ -341,7 +345,7 @@ struct SimulatorConfig {
 
 fn spawn_worker(
     config: &SimulatorConfig,
-    seek_timestamp: Option<u32>,
+    seek_timestamp: Option<EventTimestamp>,
 ) -> Result<
     (
         Receiver<WorkerMessage>,
@@ -425,7 +429,7 @@ fn run_preloaded_worker(
 struct SimulatorState {
     started: bool,
     config: SimulatorConfig,
-    duration_us: usize,
+    duration_us: EventTimestamp,
     batches: Option<Receiver<WorkerMessage>>,
     active: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
@@ -435,7 +439,7 @@ struct SimulatorState {
 }
 
 impl SimulatorState {
-    fn seek(&mut self, timestamp: u32) -> Result<(), String> {
+    fn seek(&mut self, timestamp: EventTimestamp) -> Result<(), String> {
         let was_started = self.started;
         self.active.store(false, Ordering::Release);
         self.stop.store(true, Ordering::Release);
@@ -541,11 +545,11 @@ struct SimulatorIndexFacility {
 }
 
 impl PluginIndexFacility for SimulatorIndexFacility {
-    fn t_min(&self) -> ROption<usize> {
+    fn t_min(&self) -> ROption<EventTimestamp> {
         Some(0).into()
     }
 
-    fn t_max(&self) -> ROption<usize> {
+    fn t_max(&self) -> ROption<EventTimestamp> {
         self.state.lock().ok().map(|state| state.duration_us).into()
     }
 }
@@ -555,7 +559,7 @@ struct SimulatorSeekFacility {
 }
 
 impl PluginSeekFacility for SimulatorSeekFacility {
-    fn seek(&mut self, timestamp: u32) -> RResult<(), RString> {
+    fn seek(&mut self, timestamp: EventTimestamp) -> RResult<(), RString> {
         match self.state.lock() {
             Ok(mut state) => match state.seek(timestamp) {
                 Ok(()) => RResult::ROk(()),
@@ -661,7 +665,7 @@ fn simulator_parameters(configuration: &PluginConfiguration) -> Result<EvsParame
     Ok(parameters)
 }
 
-fn positive_configuration_usize(
+fn positive_configuration_dimension(
     configuration: &PluginConfiguration,
     name: &str,
     default: usize,
@@ -669,7 +673,7 @@ fn positive_configuration_usize(
     let Some(value) = configuration_value(configuration, name) else {
         return Ok(default);
     };
-    let value = value.parse::<usize>().map_err(|_| {
+    let value = value.parse::<u64>().map_err(|_| {
         SimError::InvalidConfiguration(format!("`{name}` must be a positive integer"))
     })?;
     if value == 0 {
@@ -677,7 +681,9 @@ fn positive_configuration_usize(
             "`{name}` must be a positive integer"
         )));
     }
-    Ok(value)
+    value.try_into().map_err(|_| {
+        SimError::InvalidConfiguration(format!("`{name}` is too large for this platform"))
+    })
 }
 
 impl SimulatorDevice {
@@ -691,8 +697,8 @@ impl SimulatorDevice {
                     .map_err(|_| SimError::InvalidConfiguration("`fps` must be a number".into()))
             })
             .transpose()?;
-        let output_width = positive_configuration_usize(configuration, "width", 800)?;
-        let output_height = positive_configuration_usize(configuration, "height", 600)?;
+        let output_width = positive_configuration_dimension(configuration, "width", 800)?;
+        let output_height = positive_configuration_dimension(configuration, "height", 600)?;
         let preload = configuration_value(configuration, "preload")
             .map(|value| {
                 value.parse::<bool>().map_err(|_| {
@@ -794,15 +800,15 @@ impl plugin::DevicePlugin for SimulatorDevice {
         }
     }
 
-    fn t_min(&self) -> ROption<usize> {
+    fn t_min(&self) -> ROption<EventTimestamp> {
         Some(0).into()
     }
 
-    fn t_max(&self) -> ROption<usize> {
+    fn t_max(&self) -> ROption<EventTimestamp> {
         self.state.lock().ok().map(|state| state.duration_us).into()
     }
 
-    fn seek(&mut self, timestamp: u32) -> RResult<(), RString> {
+    fn seek(&mut self, timestamp: EventTimestamp) -> RResult<(), RString> {
         match self.state.lock() {
             Ok(mut state) => match state.seek(timestamp) {
                 Ok(()) => RResult::ROk(()),
@@ -1023,7 +1029,7 @@ mod tests {
         )
         .unwrap();
 
-        let target_timestamp = 3_000_000_u32;
+        let target_timestamp = 3_000_000_u64;
         let expected_frame = (target_timestamp as f64 * simulator.fps / 1_000_000.0).floor() as u64;
         simulator.seek(target_timestamp).unwrap();
         assert_eq!(simulator.frame_index, expected_frame);
@@ -1121,8 +1127,8 @@ mod tests {
         let mut previous_timestamp = None;
         let mut event_count = 0;
         for (frame, batch) in batches.iter().enumerate() {
-            let frame_start = (frame as f64 * frame_period_us).floor() as usize;
-            let frame_end = ((frame + 1) as f64 * frame_period_us).ceil() as usize;
+            let frame_start = (frame as f64 * frame_period_us).floor() as EventTimestamp;
+            let frame_end = ((frame + 1) as f64 * frame_period_us).ceil() as EventTimestamp;
             for event in batch {
                 assert!(
                     (frame_start..=frame_end).contains(&event.t),

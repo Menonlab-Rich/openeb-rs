@@ -13,7 +13,7 @@ use abi_stable::{
     std_types::{ROption, RSlice, RSliceMut, RString},
 };
 
-use crate::hal::types::EventCD;
+use crate::hal::types::{EventCD, EventTimestamp};
 
 /// Frame dimensions and pixel format metadata.
 /// An RGB color returned by a frame-generator colormap.
@@ -21,14 +21,14 @@ use crate::hal::types::EventCD;
 #[repr(C)]
 pub struct FrameSpec {
     /// Frame width in pixels.
-    pub width: usize,
+    pub width: u64,
     /// Frame height in pixels.
-    pub height: usize,
+    pub height: u64,
 }
 
 impl FrameSpec {
     /// Returns the number of bytes required for an RGBA frame.
-    pub fn rgba_buffer_size(&self) -> usize {
+    pub fn rgba_buffer_size(&self) -> u64 {
         self.width * self.height * 4
     }
 }
@@ -56,7 +56,7 @@ pub trait FrameGenerator: Send + Sync {
     ///
     /// `current_t`: Reference timestamp (in microseconds) for temporal modalities.
     /// `out_rgba`: Pre-allocated buffer of length `width * height * 4`.
-    fn render(&self, current_t: usize, out_rgba: RSliceMut<'_, u8>);
+    fn render(&self, current_t: EventTimestamp, out_rgba: RSliceMut<'_, u8>);
 
     /// Resets or clears internal state buffers.
     fn reset(&mut self);

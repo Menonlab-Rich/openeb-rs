@@ -174,7 +174,7 @@ pub struct EvsState {
 
 pub struct Event {
     pub timestamp: f32,
-    pub pixel_index: usize,
+    pub pixel_index: u64,
     pub polarity: bool, // true for ON, false for OFF
 }
 
@@ -229,11 +229,12 @@ impl NoiseGenerator {
 #[hotpath::measure_all]
 impl EvsSimulator {
     /// Creates a simulator for a sensor containing `num_pixels` pixels.
-    pub fn new(num_pixels: usize, params: EvsParameters) -> Result<Self, String> {
+    pub fn new(num_pixels: u64, params: EvsParameters) -> Result<Self, String> {
         params.validate()?;
+        let num_pixels = pixel_count_to_capacity(num_pixels)?;
         Ok(Self {
             params,
-            state: EvsState::new(num_pixels),
+            state: EvsState::with_capacity(num_pixels),
             noise: NoiseGenerator::new(),
             noise_samples: NoiseSamples::default(),
         })
@@ -241,7 +242,7 @@ impl EvsSimulator {
 
     /// Resets the circuit and noise state before replaying from a new time.
     pub fn reset(&mut self) {
-        self.state = EvsState::new(self.state.dphi_fe.len());
+        self.state = EvsState::with_capacity(self.state.dphi_fe.len());
         self.noise = NoiseGenerator::new();
         self.noise_samples = NoiseSamples::default();
     }
@@ -314,7 +315,11 @@ fn autoregressive_input_std(stationary_std: f32, dt: f32, tau: f32) -> f32 {
 }
 
 impl EvsState {
-    pub fn new(num_pixels: usize) -> Self {
+    pub fn new(num_pixels: u64) -> Result<Self, String> {
+        Ok(Self::with_capacity(pixel_count_to_capacity(num_pixels)?))
+    }
+
+    fn with_capacity(num_pixels: usize) -> Self {
         Self {
             dphi_fe: vec![0.0; num_pixels],
             dphi_o1: vec![0.0; num_pixels],
@@ -459,14 +464,14 @@ fn step_forward_euler_impl(
                     *ref_voltage = noisy_o1;
                     Some(Event {
                         timestamp: current_time,
-                        pixel_index: i,
+                        pixel_index: i as u64,
                         polarity: true,
                     })
                 } else if voltage_diff <= -params.threshold_off {
                     *ref_voltage = noisy_o1;
                     Some(Event {
                         timestamp: current_time,
-                        pixel_index: i,
+                        pixel_index: i as u64,
                         polarity: false,
                     })
                 } else {
@@ -492,6 +497,10 @@ fn step_forward_euler_impl(
         events.truncate(max_events);
     }
     events_out.extend(events);
+}
+
+fn pixel_count_to_capacity(num_pixels: u64) -> Result<usize, String> {
+    usize::try_from(num_pixels).map_err(|_| "pixel count is too large for this platform".to_owned())
 }
 
 fn splitmix64(mut value: u64) -> u64 {

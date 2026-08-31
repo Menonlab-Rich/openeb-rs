@@ -71,6 +71,8 @@ mod raw;
 #[path = "devices/types.rs"]
 pub mod types;
 
+pub mod algorithms;
+
 #[cfg(feature = "python")]
 /// Python bindings for the device and event APIs.
 pub mod python;
@@ -79,6 +81,6 @@ pub mod python;
 pub use raw::RawFilePlugin;
 #[cfg(feature = "devices")]
 pub use raw::{
-    BufferReplenisher, EventWindowIterator, IterAsync, IterSync, RawFileReader,
-    RawEventStreamDecoder,
+    BufferReplenisher, EventWindowIterator, IterAsync, IterSync, RawEventStreamDecoder,
+    RawFileReader,
 };

@@ -24,16 +24,15 @@ use abi_stable::{
 use crossbeam::channel::Receiver;
 use std::sync::{Arc, Mutex};
 
-use crate::hal::device::discovery::ConnectionType;
 use crate::hal::device::configuration::PluginConfigurationSchema;
+use crate::hal::device::discovery::ConnectionType;
 use crate::hal::device::plugin::{
     DeviceDiscoveryPlugin, DeviceDiscoveryPlugin_TO, DeviceDiscoveryPluginBox, DevicePlugin,
     DevicePlugin_TO, DevicePluginBox, EventBatchSinkBox, PluginCameraDescriptionAbi,
-    PluginConfiguration,
-    PluginFacility, PluginFacilityHandle, PluginFacilityType, PluginGeometry,
+    PluginConfiguration, PluginFacility, PluginFacilityHandle, PluginFacilityType, PluginGeometry,
     PluginGeometryFacility, PluginGeometryFacility_TO,
 };
-use crate::hal::types::{EventCD, EventExtTrigger};
+use crate::hal::types::{EventCD, EventExtTrigger, EventTimestamp};
 use crate::raw::RawFileReader;
 
 // Keep the example's stack footprint aligned with the normal reader tests;
@@ -109,15 +108,23 @@ struct RawGeometryFacility {
     height: u32,
 }
 
-struct RawIndexFacility<const N: usize> { reader: Arc<Mutex<RawFileReader<N>>> }
+struct RawIndexFacility<const N: usize> {
+    reader: Arc<Mutex<RawFileReader<N>>>,
+}
 impl<const N: usize> crate::hal::device::plugin::PluginIndexFacility for RawIndexFacility<N> {
-    fn t_min(&self) -> ROption<usize> { self.reader.lock().unwrap().t_min().into() }
-    fn t_max(&self) -> ROption<usize> { self.reader.lock().unwrap().t_max().into() }
+    fn t_min(&self) -> ROption<EventTimestamp> {
+        self.reader.lock().unwrap().t_min().into()
+    }
+    fn t_max(&self) -> ROption<EventTimestamp> {
+        self.reader.lock().unwrap().t_max().into()
+    }
 }
 
-struct RawSeekFacility<const N: usize> { reader: Arc<Mutex<RawFileReader<N>>> }
+struct RawSeekFacility<const N: usize> {
+    reader: Arc<Mutex<RawFileReader<N>>>,
+}
 impl<const N: usize> crate::hal::device::plugin::PluginSeekFacility for RawSeekFacility<N> {
-    fn seek(&mut self, timestamp: u32) -> RResult<(), RString> {
+    fn seek(&mut self, timestamp: EventTimestamp) -> RResult<(), RString> {
         match self.reader.lock().unwrap().seek(timestamp) {
             Ok(()) => RResult::ROk(()),
             Err(error) => RResult::RErr(error.to_string().into()),
@@ -125,7 +132,9 @@ impl<const N: usize> crate::hal::device::plugin::PluginSeekFacility for RawSeekF
     }
 }
 
-struct RawExternalTriggerSeekFacility<const N: usize> { reader: Arc<Mutex<RawFileReader<N>>> }
+struct RawExternalTriggerSeekFacility<const N: usize> {
+    reader: Arc<Mutex<RawFileReader<N>>>,
+}
 impl<const N: usize> crate::hal::device::plugin::PluginExternalTriggerSeekFacility
     for RawExternalTriggerSeekFacility<N>
 {
@@ -138,8 +147,12 @@ impl<const N: usize> crate::hal::device::plugin::PluginExternalTriggerSeekFacili
 }
 
 impl PluginGeometryFacility for RawGeometryFacility {
-    fn get_width(&self) -> u32 { self.width }
-    fn get_height(&self) -> u32 { self.height }
+    fn get_width(&self) -> u32 {
+        self.width
+    }
+    fn get_height(&self) -> u32 {
+        self.height
+    }
 }
 
 impl DevicePlugin for RawFilePlugin {
@@ -156,17 +169,19 @@ impl DevicePlugin for RawFilePlugin {
         PluginGeometry { width, height }
     }
 
-    fn t_min(&self) -> ROption<usize> {
+    fn t_min(&self) -> ROption<EventTimestamp> {
         self.reader.lock().unwrap().t_min().into()
     }
 
-    fn t_max(&self) -> ROption<usize> {
+    fn t_max(&self) -> ROption<EventTimestamp> {
         self.reader.lock().unwrap().t_max().into()
     }
 
-    fn seek(&mut self, timestamp: u32) -> RResult<(), RString> {
+    fn seek(&mut self, timestamp: EventTimestamp) -> RResult<(), RString> {
         Self::result(
-            self.reader.lock().unwrap()
+            self.reader
+                .lock()
+                .unwrap()
                 .seek(timestamp)
                 .map_err(|error| error.to_string()),
         )
@@ -174,7 +189,9 @@ impl DevicePlugin for RawFilePlugin {
 
     fn seek_to_next_ext(&mut self) -> RResult<(), RString> {
         Self::result(
-            self.reader.lock().unwrap()
+            self.reader
+                .lock()
+                .unwrap()
                 .seek_to_next_ext()
                 .map_err(|error| error.to_string()),
         )
@@ -210,23 +227,38 @@ impl DevicePlugin for RawFilePlugin {
                         RawGeometryFacility { width, height },
                         TD_Opaque,
                     ),
-                )).into()
+                ))
+                .into()
             }
             PluginFacilityType::Index => Some(PluginFacilityHandle::Index(
                 crate::hal::device::plugin::PluginIndexFacility_TO::from_value(
-                    RawIndexFacility { reader: Arc::clone(&self.reader) }, TD_Opaque,
+                    RawIndexFacility {
+                        reader: Arc::clone(&self.reader),
+                    },
+                    TD_Opaque,
                 ),
-            )).into(),
+            ))
+            .into(),
             PluginFacilityType::Seek => Some(PluginFacilityHandle::Seek(
                 crate::hal::device::plugin::PluginSeekFacility_TO::from_value(
-                    RawSeekFacility { reader: Arc::clone(&self.reader) }, TD_Opaque,
+                    RawSeekFacility {
+                        reader: Arc::clone(&self.reader),
+                    },
+                    TD_Opaque,
                 ),
-            )).into(),
-            PluginFacilityType::ExternalTriggerSeek => Some(PluginFacilityHandle::ExternalTriggerSeek(
-                crate::hal::device::plugin::PluginExternalTriggerSeekFacility_TO::from_value(
-                    RawExternalTriggerSeekFacility { reader: Arc::clone(&self.reader) }, TD_Opaque,
-                ),
-            )).into(),
+            ))
+            .into(),
+            PluginFacilityType::ExternalTriggerSeek => {
+                Some(PluginFacilityHandle::ExternalTriggerSeek(
+                    crate::hal::device::plugin::PluginExternalTriggerSeekFacility_TO::from_value(
+                        RawExternalTriggerSeekFacility {
+                            reader: Arc::clone(&self.reader),
+                        },
+                        TD_Opaque,
+                    ),
+                ))
+                .into()
+            }
             _ => ROption::RNone,
         }
     }

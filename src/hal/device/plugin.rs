@@ -15,7 +15,7 @@ use abi_stable::{
 
 use super::discovery::ConnectionType;
 use crate::hal::facilities::FacilityType;
-use crate::hal::types::{EventCD, EventExtTrigger};
+use crate::hal::types::{EventCD, EventExtTrigger, EventTimestamp, StreamLength};
 
 /// One named plugin creation value.
 ///
@@ -109,7 +109,7 @@ pub struct PluginStreamBuffer {
     /// ABI-safe storage containing the raw bytes.
     pub data: RVec<u8>,
     /// Number of valid bytes in `data`.
-    pub valid_len: usize,
+    pub valid_len: StreamLength,
 }
 
 impl From<PluginCameraDescriptionAbi> for super::discovery::PluginCameraDescription {
@@ -435,15 +435,15 @@ pub trait PluginRawEventStreamDecoderFacility: Send + Sync {
     /// Decodes one raw buffer.
     fn decode(&mut self, raw_data: RSlice<'_, u8>) -> RResult<(), RString>;
     /// Returns the last decoded timestamp.
-    fn get_last_timestamp(&self) -> usize;
+    fn get_last_timestamp(&self) -> EventTimestamp;
     /// Returns the timestamp shift baseline, if known.
-    fn get_timestamp_shift(&self) -> ROption<usize>;
+    fn get_timestamp_shift(&self) -> ROption<EventTimestamp>;
     /// Reports whether time shifting is enabled.
     fn is_time_shifting_enabled(&self) -> bool;
     /// Replaces the last decoded timestamp.
-    fn reset_last_timestamp(&mut self, timestamp: usize);
+    fn reset_last_timestamp(&mut self, timestamp: EventTimestamp);
     /// Replaces the timestamp shift baseline.
-    fn reset_timestamp_shift(&mut self, shift: usize);
+    fn reset_timestamp_shift(&mut self, shift: EventTimestamp);
     /// Reports whether timestamp indexing is supported.
     fn is_decoded_event_stream_indexable(&self) -> bool;
 }
@@ -471,9 +471,9 @@ pub type PluginEventSubscriptionFacilityBox = PluginEventSubscriptionFacility_TO
 #[sabi_trait]
 pub trait PluginIndexFacility: Send + Sync {
     /// Returns the earliest indexed timestamp, if available.
-    fn t_min(&self) -> ROption<usize>;
+    fn t_min(&self) -> ROption<EventTimestamp>;
     /// Returns the latest indexed timestamp, if available.
-    fn t_max(&self) -> ROption<usize>;
+    fn t_max(&self) -> ROption<EventTimestamp>;
 }
 
 /// ABI-safe boxed timestamp-index facility.
@@ -483,7 +483,7 @@ pub type PluginIndexFacilityBox = PluginIndexFacility_TO<'static, RBox<()>>;
 #[sabi_trait]
 pub trait PluginSeekFacility: Send + Sync {
     /// Seeks to a timestamp.
-    fn seek(&mut self, timestamp: u32) -> RResult<(), RString>;
+    fn seek(&mut self, timestamp: EventTimestamp) -> RResult<(), RString>;
 }
 
 /// ABI-safe boxed timestamp-seek facility.
@@ -515,25 +515,101 @@ macro_rules! define_marker_plugin_facility {
     };
 }
 
-define_marker_plugin_facility!(PluginAntiFlickerFacility, PluginAntiFlickerFacility_TO, PluginAntiFlickerFacilityBox);
-define_marker_plugin_facility!(PluginRawDecoderFacility, PluginRawDecoderFacility_TO, PluginRawDecoderFacilityBox);
-define_marker_plugin_facility!(PluginCameraSyncFacility, PluginCameraSyncFacility_TO, PluginCameraSyncFacilityBox);
-define_marker_plugin_facility!(PluginRawEventDecoderFacility, PluginRawEventDecoderFacility_TO, PluginRawEventDecoderFacilityBox);
-define_marker_plugin_facility!(PluginDigitalCropFacility, PluginDigitalCropFacility_TO, PluginDigitalCropFacilityBox);
-define_marker_plugin_facility!(PluginDigitalEventMaskFacility, PluginDigitalEventMaskFacility_TO, PluginDigitalEventMaskFacilityBox);
-define_marker_plugin_facility!(PluginERCModuleFacility, PluginERCModuleFacility_TO, PluginERCModuleFacilityBox);
-define_marker_plugin_facility!(PluginCDEventDecoderFacility, PluginCDEventDecoderFacility_TO, PluginCDEventDecoderFacilityBox);
-define_marker_plugin_facility!(PluginTriggerEventDecoderFacility, PluginTriggerEventDecoderFacility_TO, PluginTriggerEventDecoderFacilityBox);
-define_marker_plugin_facility!(PluginERCCounterEventDecoderFacility, PluginERCCounterEventDecoderFacility_TO, PluginERCCounterEventDecoderFacilityBox);
-define_marker_plugin_facility!(PluginRGBEventFrameDecoderFacility, PluginRGBEventFrameDecoderFacility_TO, PluginRGBEventFrameDecoderFacilityBox);
-define_marker_plugin_facility!(PluginMonoEventFrameDecoderFacility, PluginMonoEventFrameDecoderFacility_TO, PluginMonoEventFrameDecoderFacilityBox);
-define_marker_plugin_facility!(PluginEventRateActivityFilterModuleFacility, PluginEventRateActivityFilterModuleFacility_TO, PluginEventRateActivityFilterModuleFacilityBox);
-define_marker_plugin_facility!(PluginEventTrailFilterModuleFacility, PluginEventTrailFilterModuleFacility_TO, PluginEventTrailFilterModuleFacilityBox);
-define_marker_plugin_facility!(PluginHWRegisterFacility, PluginHWRegisterFacility_TO, PluginHWRegisterFacilityBox);
-define_marker_plugin_facility!(PluginLLBiasesFacility, PluginLLBiasesFacility_TO, PluginLLBiasesFacilityBox);
-define_marker_plugin_facility!(PluginROIPixelMaskFacility, PluginROIPixelMaskFacility_TO, PluginROIPixelMaskFacilityBox);
-define_marker_plugin_facility!(PluginTriggerInFacility, PluginTriggerInFacility_TO, PluginTriggerInFacilityBox);
-define_marker_plugin_facility!(PluginTriggerOutFacility, PluginTriggerOutFacility_TO, PluginTriggerOutFacilityBox);
+define_marker_plugin_facility!(
+    PluginAntiFlickerFacility,
+    PluginAntiFlickerFacility_TO,
+    PluginAntiFlickerFacilityBox
+);
+define_marker_plugin_facility!(
+    PluginRawDecoderFacility,
+    PluginRawDecoderFacility_TO,
+    PluginRawDecoderFacilityBox
+);
+define_marker_plugin_facility!(
+    PluginCameraSyncFacility,
+    PluginCameraSyncFacility_TO,
+    PluginCameraSyncFacilityBox
+);
+define_marker_plugin_facility!(
+    PluginRawEventDecoderFacility,
+    PluginRawEventDecoderFacility_TO,
+    PluginRawEventDecoderFacilityBox
+);
+define_marker_plugin_facility!(
+    PluginDigitalCropFacility,
+    PluginDigitalCropFacility_TO,
+    PluginDigitalCropFacilityBox
+);
+define_marker_plugin_facility!(
+    PluginDigitalEventMaskFacility,
+    PluginDigitalEventMaskFacility_TO,
+    PluginDigitalEventMaskFacilityBox
+);
+define_marker_plugin_facility!(
+    PluginERCModuleFacility,
+    PluginERCModuleFacility_TO,
+    PluginERCModuleFacilityBox
+);
+define_marker_plugin_facility!(
+    PluginCDEventDecoderFacility,
+    PluginCDEventDecoderFacility_TO,
+    PluginCDEventDecoderFacilityBox
+);
+define_marker_plugin_facility!(
+    PluginTriggerEventDecoderFacility,
+    PluginTriggerEventDecoderFacility_TO,
+    PluginTriggerEventDecoderFacilityBox
+);
+define_marker_plugin_facility!(
+    PluginERCCounterEventDecoderFacility,
+    PluginERCCounterEventDecoderFacility_TO,
+    PluginERCCounterEventDecoderFacilityBox
+);
+define_marker_plugin_facility!(
+    PluginRGBEventFrameDecoderFacility,
+    PluginRGBEventFrameDecoderFacility_TO,
+    PluginRGBEventFrameDecoderFacilityBox
+);
+define_marker_plugin_facility!(
+    PluginMonoEventFrameDecoderFacility,
+    PluginMonoEventFrameDecoderFacility_TO,
+    PluginMonoEventFrameDecoderFacilityBox
+);
+define_marker_plugin_facility!(
+    PluginEventRateActivityFilterModuleFacility,
+    PluginEventRateActivityFilterModuleFacility_TO,
+    PluginEventRateActivityFilterModuleFacilityBox
+);
+define_marker_plugin_facility!(
+    PluginEventTrailFilterModuleFacility,
+    PluginEventTrailFilterModuleFacility_TO,
+    PluginEventTrailFilterModuleFacilityBox
+);
+define_marker_plugin_facility!(
+    PluginHWRegisterFacility,
+    PluginHWRegisterFacility_TO,
+    PluginHWRegisterFacilityBox
+);
+define_marker_plugin_facility!(
+    PluginLLBiasesFacility,
+    PluginLLBiasesFacility_TO,
+    PluginLLBiasesFacilityBox
+);
+define_marker_plugin_facility!(
+    PluginROIPixelMaskFacility,
+    PluginROIPixelMaskFacility_TO,
+    PluginROIPixelMaskFacilityBox
+);
+define_marker_plugin_facility!(
+    PluginTriggerInFacility,
+    PluginTriggerInFacility_TO,
+    PluginTriggerInFacilityBox
+);
+define_marker_plugin_facility!(
+    PluginTriggerOutFacility,
+    PluginTriggerOutFacility_TO,
+    PluginTriggerOutFacilityBox
+);
 
 /// Type-erased facility handle returned by a plugin.
 ///
@@ -592,7 +668,9 @@ impl PluginFacilityHandle {
             Self::ERCCounterEventDecoder(_) => PluginFacilityType::ERCCounterEventDecoder,
             Self::RGBEventFrameDecoder(_) => PluginFacilityType::RGBEventFrameDecoder,
             Self::MonoEventFrameDecoder(_) => PluginFacilityType::MonoEventFrameDecoder,
-            Self::EventRateActivityFilterModule(_) => PluginFacilityType::EventRateActivityFilterModule,
+            Self::EventRateActivityFilterModule(_) => {
+                PluginFacilityType::EventRateActivityFilterModule
+            }
             Self::EventTrailFilterModule(_) => PluginFacilityType::EventTrailFilterModule,
             Self::HWRegister(_) => PluginFacilityType::HWRegister,
             Self::LLBiases(_) => PluginFacilityType::LLBiases,
@@ -631,13 +709,17 @@ pub trait DevicePlugin: Send + Sync {
     fn geometry(&self) -> PluginGeometry;
     #[deprecated(note = "use PluginIndexFacility")]
     /// Returns the earliest indexed timestamp.
-    fn t_min(&self) -> ROption<usize> { ROption::RNone }
+    fn t_min(&self) -> ROption<EventTimestamp> {
+        ROption::RNone
+    }
     #[deprecated(note = "use PluginIndexFacility")]
     /// Returns the latest indexed timestamp.
-    fn t_max(&self) -> ROption<usize> { ROption::RNone }
+    fn t_max(&self) -> ROption<EventTimestamp> {
+        ROption::RNone
+    }
     #[deprecated(note = "use PluginSeekFacility")]
     /// Performs the legacy timestamp seek operation.
-    fn seek(&mut self, _timestamp: u32) -> RResult<(), RString> {
+    fn seek(&mut self, _timestamp: EventTimestamp) -> RResult<(), RString> {
         RResult::RErr("seek is not supported by this plugin".into())
     }
     #[deprecated(note = "use PluginExternalTriggerSeekFacility")]
@@ -651,8 +733,12 @@ pub trait DevicePlugin: Send + Sync {
     /// Returns a legacy capability descriptor.
     fn get_facility(&self, facility_type: PluginFacilityType) -> ROption<PluginFacility>;
     /// Returns an ABI-safe handle for a capability.
-    fn get_facility_handle(&self, _facility_type: PluginFacilityType)
-        -> ROption<PluginFacilityHandle> { ROption::RNone }
+    fn get_facility_handle(
+        &self,
+        _facility_type: PluginFacilityType,
+    ) -> ROption<PluginFacilityHandle> {
+        ROption::RNone
+    }
     #[deprecated(note = "use the event-stream and event-decoder facilities")]
     /// Starts legacy event delivery.
     fn start_events(&mut self, sink: EventBatchSinkBox) -> RResult<(), RString>;
@@ -674,7 +760,9 @@ pub trait DeviceDiscoveryPlugin: Send + Sync {
     ///
     /// An empty string means that the plugin has no configuration schema and
     /// only supports the legacy serial-based opening method.
-    fn configuration_schema(&self) -> RString { "".into() }
+    fn configuration_schema(&self) -> RString {
+        "".into()
+    }
     /// Opens a device by serial number.
     #[deprecated(note = "use open_device_with_configuration")]
     fn open_device(&self, serial: RStr<'_>) -> RResult<DevicePluginBox, RString>;

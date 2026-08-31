@@ -1,5 +1,6 @@
 use crate::hal::device::discovery::PluginRegistry;
 use crate::hal::device::plugin::{DevicePluginBox, EventBatchSink, EventBatchSink_TO};
+use crate::hal::types::{EventCount, EventTimestamp};
 use crate::types::{DeviceFileError, EventCD};
 use abi_stable::{std_types::RSlice, type_level::downcasting::TD_Opaque};
 use crossbeam::channel::{Receiver, Sender};
@@ -37,8 +38,8 @@ struct PluginReader {
     device: Arc<Mutex<DevicePluginBox>>,
     receiver: EventReceiver,
     shape: (u32, u32),
-    t_min: Option<usize>,
-    t_max: Option<usize>,
+    t_min: Option<EventTimestamp>,
+    t_max: Option<EventTimestamp>,
 }
 
 impl PluginReader {
@@ -85,7 +86,7 @@ impl PluginReader {
             .map_err(|error| PyIOError::new_err(error.to_string()))
     }
 
-    fn seek(&self, timestamp: u32) -> PyResult<()> {
+    fn seek(&self, timestamp: EventTimestamp) -> PyResult<()> {
         self.device
             .lock()
             .map_err(|_| PyRuntimeError::new_err("plugin device lock poisoned"))?
@@ -136,17 +137,17 @@ impl From<DeviceFileError> for PyErr {
 #[derive(Debug, Clone, Copy)]
 #[pyclass(from_py_object)]
 pub struct PyEventCD {
-    x: u16,
-    y: u16,
+    x: u64,
+    y: u64,
     p: u8,
-    t: usize,
+    t: EventTimestamp,
 }
 
 impl From<EventCD> for PyEventCD {
     fn from(value: EventCD) -> Self {
         Self {
-            x: value.x as u16, // very unlikely to overflow, 8k is << 2^16
-            y: value.y as u16,
+            x: value.x,
+            y: value.y,
             p: value.p.into(),
             t: value.t,
         }
@@ -156,8 +157,8 @@ impl From<EventCD> for PyEventCD {
 impl From<&EventCD> for PyEventCD {
     fn from(value: &EventCD) -> Self {
         Self {
-            x: value.x as u16, // very unlikely to overflow, 8k is << 2^16
-            y: value.y as u16,
+            x: value.x,
+            y: value.y,
             p: value.p.into(),
             t: value.t,
         }
@@ -187,7 +188,7 @@ unsafe impl Element for PyEventCD {
         let dtype_spec = PyDict::new(py);
         dtype_spec.set_item("names", ("x", "y", "p", "t")).unwrap();
         dtype_spec
-            .set_item("formats", ("u2", "u2", "u1", "u8"))
+            .set_item("formats", ("u8", "u8", "u1", "u8"))
             .unwrap();
         dtype_spec
             .set_item(
@@ -287,7 +288,7 @@ pub struct PyCDEventIterator {
     device: Arc<Mutex<DevicePluginBox>>,
     receiver: EventReceiver,
     internal_buffer: VecDeque<EventCD>,
-    current_timestamp: Option<u64>,
+    current_timestamp: Option<EventTimestamp>,
     shape: (u32, u32),
 }
 
@@ -312,18 +313,25 @@ impl PyCDEventIterator {
     }
 
     /// Return up to `n` events while preserving any remaining events.
-    fn next_n<'py>(&mut self, py: Python<'py>, n: usize) -> PyResult<Bound<'py, PyAny>> {
+    fn next_n<'py>(&mut self, py: Python<'py>, n: EventCount) -> PyResult<Bound<'py, PyAny>> {
+        let limit = usize::try_from(n).map_err(|_| {
+            PyValueError::new_err("requested event count does not fit this platform")
+        })?;
         assert!(
-            n < PYTHON_BUFFER_SIZE,
+            limit < PYTHON_BUFFER_SIZE,
             "requested event count must be smaller than the iterator buffer size"
         );
-        let events = self.take_up_to(n)?;
+        let events = self.take_up_to(limit)?;
         Ok(events_to_numpy(py, events))
     }
 
     /// Return the next time window containing events within `dt` timestamp
     /// units of the iterator's current time baseline.
-    fn next_delta<'py>(&mut self, py: Python<'py>, dt: u64) -> PyResult<Bound<'py, PyAny>> {
+    fn next_delta<'py>(
+        &mut self,
+        py: Python<'py>,
+        dt: EventTimestamp,
+    ) -> PyResult<Bound<'py, PyAny>> {
         let events = self.take_delta(dt)?;
         Ok(events_to_numpy(py, events))
     }
@@ -368,7 +376,7 @@ impl PyCDEventIterator {
                     break;
                 };
                 if self.current_timestamp.is_none() {
-                    self.current_timestamp = Some(event.t as u64);
+                    self.current_timestamp = Some(event.t);
                 }
                 events.push(event);
             }
@@ -376,14 +384,14 @@ impl PyCDEventIterator {
         Ok(events)
     }
 
-    fn take_delta(&mut self, dt: u64) -> PyResult<Vec<EventCD>> {
+    fn take_delta(&mut self, dt: EventTimestamp) -> PyResult<Vec<EventCD>> {
         self.replenish()?;
         let start_ts = match self.current_timestamp {
             Some(ts) => ts,
             None => self
                 .internal_buffer
                 .front()
-                .map(|event| event.t as u64)
+                .map(|event| event.t)
                 .unwrap_or(0),
         };
         self.current_timestamp = Some(start_ts);
@@ -392,7 +400,7 @@ impl PyCDEventIterator {
         loop {
             self.replenish()?;
             match self.internal_buffer.front() {
-                Some(event) if (event.t as u64) < end_ts => {
+                Some(event) if event.t < end_ts => {
                     events.push(self.internal_buffer.pop_front().unwrap());
                 }
                 _ => break,
@@ -465,15 +473,15 @@ impl PyRawFileReader {
         true
     }
 
-    fn t_min(&self) -> Option<usize> {
+    fn t_min(&self) -> Option<EventTimestamp> {
         self.inner.t_min
     }
 
-    fn t_max(&self) -> Option<usize> {
+    fn t_max(&self) -> Option<EventTimestamp> {
         self.inner.t_max
     }
 
-    fn seek(&mut self, ts: u32) -> PyResult<()> {
+    fn seek(&mut self, ts: EventTimestamp) -> PyResult<()> {
         self.inner.seek(ts)?;
         Ok(())
     }

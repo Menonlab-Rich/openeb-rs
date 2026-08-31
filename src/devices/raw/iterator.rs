@@ -16,8 +16,8 @@ use std::{
 use crossbeam::channel::Receiver;
 use openevt_core::hal::{
     errors::StreamError,
-    facilities::{RawEventStreamDecoderFacility, RawEventStreamFacility, FacilityError},
-    types::EventCD,
+    facilities::{FacilityError, RawEventStreamDecoderFacility, RawEventStreamFacility},
+    types::{EventCD, EventCount, EventTimestamp},
 };
 
 use crate::{raw::stream::RawEventStream, types::DeviceFileError};
@@ -37,7 +37,7 @@ pub struct EventWindowIterator<const BUFFER_SIZE: usize, State = IterUnconfigure
     // Holds leftover events from decoded batches that have not been consumed yet
     internal_buffer: std::collections::VecDeque<EventCD>,
     // Tracks the current temporal baseline for slicing fixed delta-t windows
-    current_timestamp: Option<u64>,
+    current_timestamp: Option<EventTimestamp>,
     shape: (u32, u32),
     _state: PhantomData<State>,
 }
@@ -161,15 +161,17 @@ impl<const BUFFER_SIZE: usize, State> EventWindowIterator<BUFFER_SIZE, State> {
     ///
     /// The requested count must be smaller than the iterator buffer size.
     /// Events beyond `n` remain available for the next call.
-    pub fn next_n(&mut self, n: usize) -> Result<Vec<EventCD>, DeviceFileError>
+    pub fn next_n(&mut self, n: EventCount) -> Result<Vec<EventCD>, DeviceFileError>
     where
         Self: BufferReplenisher,
     {
+        let limit = usize::try_from(n)
+            .expect("requested event count does not fit this platform's allocation size");
         assert!(
-            n < BUFFER_SIZE,
+            limit < BUFFER_SIZE,
             "requested event count must be smaller than the iterator buffer size"
         );
-        self.next_up_to(n)
+        self.next_up_to(limit)
     }
 
     fn next_up_to(&mut self, limit: usize) -> Result<Vec<EventCD>, DeviceFileError>
@@ -193,7 +195,7 @@ impl<const BUFFER_SIZE: usize, State> EventWindowIterator<BUFFER_SIZE, State> {
 
             if let Some(event) = self.internal_buffer.pop_front() {
                 if self.current_timestamp.is_none() {
-                    self.current_timestamp = Some(event.t as u64);
+                    self.current_timestamp = Some(event.t);
                 }
                 batch.push(event);
             }
@@ -206,7 +208,7 @@ impl<const BUFFER_SIZE: usize, State> EventWindowIterator<BUFFER_SIZE, State> {
     /// current timestamp baseline.
     ///
     /// The iterator advances its internal time baseline by `dt` after each call.
-    pub fn next_delta(&mut self, dt: u64) -> Result<Vec<EventCD>, DeviceFileError>
+    pub fn next_delta(&mut self, dt: EventTimestamp) -> Result<Vec<EventCD>, DeviceFileError>
     where
         Self: BufferReplenisher,
     {
@@ -218,7 +220,7 @@ impl<const BUFFER_SIZE: usize, State> EventWindowIterator<BUFFER_SIZE, State> {
             Some(ts) => ts,
             None => {
                 if let Some(first_ev) = self.internal_buffer.front() {
-                    let ts = first_ev.t as u64;
+                    let ts = first_ev.t;
                     self.current_timestamp = Some(ts);
                     ts
                 } else {
@@ -244,7 +246,7 @@ impl<const BUFFER_SIZE: usize, State> EventWindowIterator<BUFFER_SIZE, State> {
             }
 
             if let Some(event) = self.internal_buffer.front() {
-                if (event.t as u64) < end_ts {
+                if event.t < end_ts {
                     window_events.push(self.internal_buffer.pop_front().unwrap());
                 } else {
                     break;

@@ -6,7 +6,7 @@
 
 use crate::types::RawEventBuffer;
 use openevt_core::hal::errors::StreamError;
-use openevt_core::hal::facilities::{RawEventStreamFacility, FacilityError, FacilityResult};
+use openevt_core::hal::facilities::{FacilityError, FacilityResult, RawEventStreamFacility};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
@@ -51,7 +51,7 @@ impl<const N: usize> RawEventStreamFacility for RawEventStream<N> {
     }
 
     /// Polls the next buffer if the stream has started.
-    fn poll_buffer(&mut self) -> FacilityResult<(Vec<u8>, usize)> {
+    fn poll_buffer(&mut self) -> FacilityResult<openevt_core::hal::facilities::StreamBuffer> {
         if !self.started {
             return Err(FacilityError::Stream(StreamError::Disconnected));
         }
@@ -59,7 +59,7 @@ impl<const N: usize> RawEventStreamFacility for RawEventStream<N> {
     }
 
     /// Reads the next buffer from disk, blocking on I/O as needed.
-    fn wait_next_buffer(&mut self) -> FacilityResult<(Vec<u8>, usize)> {
+    fn wait_next_buffer(&mut self) -> FacilityResult<openevt_core::hal::facilities::StreamBuffer> {
         if self.eof {
             return Err(FacilityError::Stream(StreamError::EndOfFile));
         }
@@ -69,7 +69,7 @@ impl<const N: usize> RawEventStreamFacility for RawEventStream<N> {
                 self.eof = true;
                 Err(FacilityError::Stream(StreamError::EndOfFile))
             }
-            Ok(bytes_read) => Ok((self.buffer[..bytes_read].to_vec(), bytes_read)),
+            Ok(bytes_read) => Ok((self.buffer[..bytes_read].to_vec(), bytes_read as u64)),
             Err(err) => {
                 self.eof = true;
                 Err(FacilityError::Stream(StreamError::IoError(err)))

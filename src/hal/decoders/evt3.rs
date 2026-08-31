@@ -9,10 +9,10 @@ use std::sync::Arc;
 use crate::hal::dispatcher::{ErrorDispatcher, EventDispatcher};
 use crate::hal::errors::DecoderProtocolViolation;
 use crate::hal::facilities::{
-    RawDecoderFacility, DecoderErrorCallback, EventCDCallback, EventSubscriptionFacility,
-    EventExtTriggerCallback, RawEventStreamDecoderFacility, FacilityResult,
+    DecoderErrorCallback, EventCDCallback, EventExtTriggerCallback, EventSubscriptionFacility,
+    FacilityResult, RawDecoderFacility, RawEventStreamDecoderFacility,
 };
-use crate::hal::types::{EventCD, EventExtTrigger};
+use crate::hal::types::{EventCD, EventExtTrigger, EventTimestamp};
 use log::warn;
 use macros::new;
 
@@ -26,21 +26,21 @@ pub struct Evt3Decoder {
     /// Thread-safe dispatcher used to route decode and protocol errors.
     pub err_dispatcher: Arc<ErrorDispatcher>,
     /// First decoded absolute timestamp, used when time shifting is enabled.
-    first_ts: Option<usize>,
+    first_ts: Option<EventTimestamp>,
     /// Accumulated wrap-around offset used to reconstruct a monotonic timestamp.
-    time_offset: usize,
+    time_offset: EventTimestamp,
     /// Last observed 24-bit timestamp value.
-    last_t24: usize,
+    last_t24: EventTimestamp,
     /// Last reported timestamp value.
-    last_t: usize,
+    last_t: EventTimestamp,
     /// When true, timestamps are shifted so the first decoded event starts at 0.
     pub do_time_shift: bool,
     /// Trailing byte from a split 16-bit word at a buffer boundary.
     split_byte: Option<u8>,
     /// High portion of the current event timestamp.
-    time_high: usize,
+    time_high: EventTimestamp,
     /// Low portion of the current event timestamp.
-    time_low: usize,
+    time_low: EventTimestamp,
     /// Current Y coordinate in the EVT3 state machine.
     y: Option<u16>,
     /// Base X coordinate for vector payloads.
@@ -50,7 +50,7 @@ pub struct Evt3Decoder {
     /// Previous decoded EVT3 word type.
     prev_word: Option<EVTWord>,
     /// Accumulates payload bits for "others" style multiword sequences.
-    payload_accumulator: usize,
+    payload_accumulator: u64,
     /// Subtype marker for vendor-specific or otherwise unhandled `Others` words.
     others_subtype: u16,
     /// Current shift offset within `payload_accumulator`.
@@ -64,8 +64,7 @@ pub struct Evt3Decoder {
     /// Maximum allowed Y coordinate.
     pub max_y: u16,
     /// Previous high timestamp value, preserved for timing validation.
-    prev_time_high: usize,
-
+    prev_time_high: EventTimestamp,
 }
 
 impl Default for Evt3Decoder {
@@ -171,7 +170,7 @@ impl Evt3Decoder {
     /// fields. The decoder tracks wrap-around and optionally shifts timestamps so
     /// the first event starts at zero.
     #[inline(always)]
-    pub fn current_timestamp(&mut self) -> usize {
+    pub fn current_timestamp(&mut self) -> EventTimestamp {
         let t24 = (self.time_high << 12) | self.time_low;
 
         if t24 < self.last_t24 {
@@ -201,22 +200,22 @@ impl Evt3Decoder {
     }
 
     /// Returns the current low timestamp field.
-    pub fn _get_time_low(&self) -> usize {
+    pub fn _get_time_low(&self) -> EventTimestamp {
         self.time_low
     }
 
     /// Returns the current high timestamp field.
-    pub fn _get_time_high(&self) -> usize {
+    pub fn _get_time_high(&self) -> EventTimestamp {
         self.time_high
     }
 
     /// Updates the current low timestamp field.
-    pub fn _set_time_low(&mut self, value: usize) {
+    pub fn _set_time_low(&mut self, value: EventTimestamp) {
         self.time_low = value
     }
 
     /// Updates the current high timestamp field.
-    pub fn _set_time_high(&mut self, value: usize) {
+    pub fn _set_time_high(&mut self, value: EventTimestamp) {
         self.time_high = value
     }
 
@@ -331,7 +330,7 @@ impl Evt3Decoder {
             EVTWord::ExtTrigger => {
                 // Decode external trigger events (e.g., synchronization signals)
                 let t = self.current_timestamp();
-                let channel = ((word >> 8) & MASK_4) as usize;
+                let channel = u64::from((word >> 8) & MASK_4);
                 let val = word & 0x01 == 1;
                 self.ext_trigger_buffer
                     .push(EventExtTrigger::new(val, t, channel));
@@ -343,7 +342,7 @@ impl Evt3Decoder {
                 self.prev_word = Some(EVTWord::TimeLow);
             }
             EVTWord::TimeHigh => {
-                let new_time_high = (word & MASK_12) as usize;
+                let new_time_high = u64::from(word & MASK_12);
                 let wrap = self.time_high > 0xF00 && new_time_high < 0x0FF;
 
                 // Track the specific error instead of a boolean
@@ -396,7 +395,7 @@ impl Evt3Decoder {
                 let shift_inc = if is_12 { 12 } else { 4 };
 
                 // Shift and accumulate the payload
-                let payload = (word & mask) as usize;
+                let payload = u64::from(word & mask);
                 match payload.checked_shl(self.payload_bit_shift as u32) {
                     Some(shifted_payload) => {
                         self.payload_accumulator |= shifted_payload;
@@ -446,8 +445,12 @@ impl Evt3Decoder {
 
 impl RawDecoderFacility for Evt3Decoder {
     /// Subscribes to decoder protocol violation errors.
-    fn subscribe_to_protocol_violation(&mut self, callback: DecoderErrorCallback) -> FacilityResult<()> {
-        self.err_dispatcher.subscribe::<DecoderProtocolViolation>(callback);
+    fn subscribe_to_protocol_violation(
+        &mut self,
+        callback: DecoderErrorCallback,
+    ) -> FacilityResult<()> {
+        self.err_dispatcher
+            .subscribe::<DecoderProtocolViolation>(callback);
         Ok(())
     }
 
@@ -504,12 +507,12 @@ impl RawEventStreamDecoderFacility for Evt3Decoder {
     }
 
     /// Returns the last timestamp emitted by the decoder.
-    fn get_last_timestamp(&self) -> usize {
+    fn get_last_timestamp(&self) -> EventTimestamp {
         self.last_t
     }
 
     /// Returns the current time shift, if one has been established.
-    fn get_timestamp_shift(&self) -> Option<usize> {
+    fn get_timestamp_shift(&self) -> Option<EventTimestamp> {
         self.first_ts
     }
 
@@ -519,12 +522,12 @@ impl RawEventStreamDecoderFacility for Evt3Decoder {
     }
 
     /// Updates the last decoded timestamp.
-    fn reset_last_timestamp(&mut self, timestamp: usize) {
+    fn reset_last_timestamp(&mut self, timestamp: EventTimestamp) {
         self.last_t = timestamp;
     }
 
     /// Updates the timestamp shift baseline.
-    fn reset_timestamp_shift(&mut self, shift: usize) {
+    fn reset_timestamp_shift(&mut self, shift: EventTimestamp) {
         self.first_ts = Some(shift);
     }
 
@@ -553,15 +556,15 @@ impl EventSubscriptionFacility for Evt3Decoder {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DecoderTimingState {
     /// Reconstructed high-order timestamp component.
-    pub time_high: usize,
+    pub time_high: EventTimestamp,
     /// Reconstructed low-order timestamp component.
-    pub time_low: usize,
+    pub time_low: EventTimestamp,
     /// Applied timestamp shift.
-    pub time_offset: usize,
+    pub time_offset: EventTimestamp,
     /// Last 24-bit timestamp observed.
-    pub last_t24: usize,
+    pub last_t24: EventTimestamp,
     /// Last complete timestamp observed.
-    pub last_t: usize,
+    pub last_t: EventTimestamp,
 }
 
 impl Evt3Decoder {

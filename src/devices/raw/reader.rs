@@ -14,13 +14,12 @@ use crate::raw::decoder::RawEventStreamDecoder;
 use crate::raw::device::RawFileHandler;
 use crate::raw::stream::RawEventStream;
 use crate::raw::{IterUnconfigured, index};
-use crate::types::{DeviceFileError, FileIndex};
+use crate::types::{DeviceFileError, EventTimestamp, FileIndex};
 use crossbeam::channel::Receiver;
-use num_traits::ToPrimitive;
 use openevt_core::hal::device::device::Device;
 use openevt_core::hal::facilities::{
-    EventSubscriptionFacilityHandle, RawEventStreamDecoderFacilityHandle, RawEventStreamFacility,
-    RawEventStreamFacilityHandle, FacilityError, FacilityType, ROIFacilityHandle,
+    EventSubscriptionFacilityHandle, FacilityError, FacilityType, ROIFacilityHandle,
+    RawEventStreamDecoderFacilityHandle, RawEventStreamFacility, RawEventStreamFacilityHandle,
 };
 use openevt_core::hal::types::{EventCD, EventExtTrigger};
 use std::sync::Arc;
@@ -75,7 +74,7 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
 
         let stream_handle: Option<RawEventStreamFacilityHandle> = Some(
             device
-        .get_facility(FacilityType::RawEventStreamFacility)
+                .get_facility(FacilityType::RawEventStreamFacility)
                 .ok_or(DeviceFileError::UnsupportedFacility(
                     "RawEventStreamFacility".to_string(),
                 ))?
@@ -84,7 +83,7 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
 
         let decoder_handle: Option<RawEventStreamDecoderFacilityHandle> = Some(
             device
-        .get_facility(FacilityType::RawEventStreamDecoderFacility)
+                .get_facility(FacilityType::RawEventStreamDecoderFacility)
                 .ok_or(DeviceFileError::UnsupportedFacility(
                     "RawEventStreamDecoderFacility".to_string(),
                 ))?
@@ -93,7 +92,7 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
 
         let event_decoder_handle: Option<EventSubscriptionFacilityHandle> = Some(
             device
-        .get_facility(FacilityType::EventSubscriptionFacility)
+                .get_facility(FacilityType::EventSubscriptionFacility)
                 .ok_or(DeviceFileError::UnsupportedFacility(
                     "EventSubscriptionFacility".to_string(),
                 ))?
@@ -160,7 +159,7 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
     }
 
     /// Returns the minimum timestamp recorded in the optional index.
-    pub fn t_min(&self) -> Option<usize> {
+    pub fn t_min(&self) -> Option<EventTimestamp> {
         if let Some(index) = &self.index {
             return Some(index.t_min);
         }
@@ -169,7 +168,7 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
     }
 
     /// Returns the maximum timestamp recorded in the optional index.
-    pub fn t_max(&self) -> Option<usize> {
+    pub fn t_max(&self) -> Option<EventTimestamp> {
         if let Some(index) = &self.index {
             return Some(index.t_max);
         }
@@ -181,7 +180,7 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
     ///
     /// This requires an index. The stream and decoder state are repositioned so
     /// the next decode call resumes from the chosen marker.
-    pub fn seek(&mut self, ts: u32) -> Result<(), DeviceFileError> {
+    pub fn seek(&mut self, ts: EventTimestamp) -> Result<(), DeviceFileError> {
         if !self.initialized {
             return Err(DeviceFileError::NotInitialized);
         }
@@ -205,12 +204,7 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
         let stream = crate::facility_downcast_mut!(stream_facility, RawEventStream<BUFFER_SIZE>)?;
         let decoder = crate::facility_downcast_mut!(decoder_facility, RawEventStreamDecoder)?;
 
-        index::seek_to_timestamp(
-            index.as_ref(),
-            ts.to_usize().expect("Failed to convert timestamp"),
-            stream,
-            decoder,
-        )
+        index::seek_to_timestamp(index.as_ref(), ts, stream, decoder)
     }
 
     /// Returns the ROIFacilityHandle allowing the reader to retain
@@ -237,7 +231,7 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
         loop {
             self.load_batch()?;
             match recv.try_recv() {
-                Ok(evts) if !evts.is_empty() => return self.seek(evts[0].t as u32),
+                Ok(evts) if !evts.is_empty() => return self.seek(evts[0].t),
                 Ok(_) => continue,
                 Err(err) => return Err(DeviceFileError::TryRecv(err)),
             }
@@ -271,9 +265,7 @@ impl<const BUFFER_SIZE: usize> RawFileReader<BUFFER_SIZE> {
     }
 
     /// Returns a receiver for decoded external-trigger event batches and starts the stream.
-    pub fn ext_receiver(
-        &mut self,
-    ) -> Result<Receiver<Vec<EventExtTrigger>>, DeviceFileError> {
+    pub fn ext_receiver(&mut self) -> Result<Receiver<Vec<EventExtTrigger>>, DeviceFileError> {
         let (sender, receiver) = crossbeam::channel::unbounded();
         let stream_handle = self.get_stream_handle()?;
         let event_decoder_handle = self.get_event_decoder_handle()?;

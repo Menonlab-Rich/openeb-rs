@@ -36,7 +36,10 @@ Minimal generator skeleton:
 
 ```rust
 use abi_stable::{sabi_trait, std_types::{ROption, RSlice, RSliceMut}};
-use openevt::{framegen::{FrameGenerator, FrameSpec}, hal::types::EventCD};
+use openevt::{
+    framegen::{FrameGenerator, FrameSpec},
+    hal::types::{EventCD, EventTimestamp},
+};
 
 pub struct Example {
     spec: FrameSpec,
@@ -45,7 +48,12 @@ pub struct Example {
 
 impl Example {
     fn new(spec: FrameSpec) -> Self {
-        Self { spec, activity: vec![0; spec.width * spec.height] }
+        let pixel_count = spec
+            .width
+            .checked_mul(spec.height)
+            .and_then(|value| value.try_into().ok())
+            .expect("frame is too large for this platform");
+        Self { spec, activity: vec![0; pixel_count] }
     }
 }
 
@@ -56,12 +64,21 @@ impl FrameGenerator for Example {
 
     fn consume(&mut self, events: RSlice<'_, EventCD>) {
         for event in events.iter() {
-            let index = event.y * self.spec.width + event.x;
-            if index < self.activity.len() { self.activity[index] += 1; }
+            let Some(index) = event
+                .y
+                .checked_mul(self.spec.width)
+                .and_then(|row| row.checked_add(event.x))
+                .and_then(|value| value.try_into().ok())
+            else {
+                continue;
+            };
+            if let Some(pixel) = self.activity.get_mut(index) {
+                *pixel += 1;
+            }
         }
     }
 
-    fn render(&self, _current_t: usize, mut out_rgba: RSliceMut<'_, u8>) {
+    fn render(&self, _current_t: EventTimestamp, mut out_rgba: RSliceMut<'_, u8>) {
         for (index, pixel) in self.activity.iter().enumerate() {
             let value = (*pixel).min(255) as u8;
             let offset = index * 4;

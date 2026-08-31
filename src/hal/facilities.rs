@@ -22,7 +22,7 @@ use crate::hal::errors::{
     DecoderError, DecoderProtocolViolation, HardwareError, ProcessingError, SharedError,
     StreamError,
 };
-use crate::hal::types::{Cb, CbRo, PixelMask, Region};
+use crate::hal::types::{CallbackId, Cb, CbRo, EventTimestamp, PixelMask, Region, StreamLength};
 use crate::hal::types::{EventCD, EventExtTrigger};
 pub use macros::pack_facility;
 use std::sync::{Arc, RwLock};
@@ -60,7 +60,8 @@ pub type ERCModuleFacilityHandle = Arc<RwLock<dyn ERCModuleFacility + Send>>;
 pub type EventSubscriptionFacilityHandle = Arc<RwLock<dyn EventSubscriptionFacility + Send>>;
 
 /// Locked handle for raw event-stream decoding.
-pub type RawEventStreamDecoderFacilityHandle = Arc<RwLock<dyn RawEventStreamDecoderFacility + Send>>;
+pub type RawEventStreamDecoderFacilityHandle =
+    Arc<RwLock<dyn RawEventStreamDecoderFacility + Send>>;
 
 /// Locked handle for RGB event-frame decoding.
 pub type EventFrameDecoderRGBFacilityHandle =
@@ -92,9 +93,11 @@ pub type TriggerOutFacilityHandle = Arc<RwLock<dyn TriggerOutFacility + Send>>;
 /// Typed raw decoder handle for CD events.
 pub type CDEventDecoderFacilityHandle = Arc<RwLock<dyn RawEventDecoderFacility<EventCD> + Send>>;
 /// Typed raw decoder handle for external-trigger events.
-pub type ExtTriggerEventDecoderFacilityHandle = Arc<RwLock<dyn RawEventDecoderFacility<EventExtTrigger> + Send>>;
+pub type ExtTriggerEventDecoderFacilityHandle =
+    Arc<RwLock<dyn RawEventDecoderFacility<EventExtTrigger> + Send>>;
 /// Typed raw decoder handle for ERC counter events.
-pub type ERCCounterEventDecoderFacilityHandle = Arc<RwLock<dyn RawEventDecoderFacility<EventERCCounter> + Send>>;
+pub type ERCCounterEventDecoderFacilityHandle =
+    Arc<RwLock<dyn RawEventDecoderFacility<EventERCCounter> + Send>>;
 
 use std::any::Any;
 use std::convert::TryFrom;
@@ -192,7 +195,7 @@ pub type FacilityResult<T> = Result<T, FacilityError>;
 /// Owned bytes returned by a stream facility. The storage strategy is private
 /// to the implementation; callers only depend on the valid byte range.
 /// A raw stream buffer and the number of valid bytes it contains.
-pub type StreamBuffer = (Vec<u8>, usize);
+pub type StreamBuffer = (Vec<u8>, StreamLength);
 
 /// Native event delivery is callback-based. Channel, queue, or task choices
 /// remain implementation details of a concrete facility.
@@ -428,10 +431,10 @@ pub trait RawEventDecoderFacility<T>: RawDecoderFacility {
     /// Decodes raw bytes and emits typed events through registered callbacks.
     fn decode(&mut self, raw_data: &[u8]) -> FacilityResult<()>;
     /// Adds a callback and returns its registration identifier.
-    fn add_decode_callback(&mut self, cb: Cb<&[T]>) -> FacilityResult<usize>;
+    fn add_decode_callback(&mut self, cb: Cb<&[T]>) -> FacilityResult<CallbackId>;
 
     /// Removes a previously registered callback.
-    fn remove_decode_callback(&mut self, cb_id: usize) -> FacilityResult<()>;
+    fn remove_decode_callback(&mut self, cb_id: CallbackId) -> FacilityResult<()>;
 }
 
 /// Decodes raw data directly into a caller-provided buffer.
@@ -489,10 +492,7 @@ pub trait EventSubscriptionFacility: BaseFacility {
     /// Registers a callback for decoded CD-event batches.
     fn subscribe_to_cd_events(&mut self, callback: EventCDCallback) -> FacilityResult<()>;
     /// Registers a callback for decoded external-trigger batches.
-    fn subscribe_to_ext_events(
-        &mut self,
-        callback: EventExtTriggerCallback,
-    ) -> FacilityResult<()>;
+    fn subscribe_to_ext_events(&mut self, callback: EventExtTriggerCallback) -> FacilityResult<()>;
 }
 
 /// Decodes events into a framed output type.
@@ -507,7 +507,10 @@ pub trait EventFrameDecoderFacility: BaseFacility {
     }
 
     /// Registers a read-only callback for generated frames.
-    fn add_event_frame_cb(&mut self, callback: CbRo<&Self::FrameType>) -> FacilityResult<usize>;
+    fn add_event_frame_cb(
+        &mut self,
+        callback: CbRo<&Self::FrameType>,
+    ) -> FacilityResult<CallbackId>;
 }
 
 /// Controls the event trail filter module.
@@ -555,11 +558,11 @@ pub trait RawEventStreamDecoderFacility: RawDecoderFacility + BaseFacility {
     fn decode(&mut self, raw_data: &[u8]) -> FacilityResult<()>;
 
     /// Gets the timestamp of the last event.
-    fn get_last_timestamp(&self) -> usize;
+    fn get_last_timestamp(&self) -> EventTimestamp;
 
     /// Retrieves the timestamp shift (timestamp of the first event in the stream).
     /// Returns `Some(shift)` if known, otherwise `None`.
-    fn get_timestamp_shift(&self) -> Option<usize>;
+    fn get_timestamp_shift(&self) -> Option<EventTimestamp>;
 
     /// Returns true if time shifting is enabled.
     fn is_time_shifting_enabled(&self) -> bool;
@@ -567,12 +570,12 @@ pub trait RawEventStreamDecoderFacility: RawDecoderFacility + BaseFacility {
     /// Resets the decoder last timestamp.
     ///
     /// If time shifting is enabled, `timestamp` must be in the shifted time reference.
-    fn reset_last_timestamp(&mut self, timestamp: usize);
+    fn reset_last_timestamp(&mut self, timestamp: EventTimestamp);
 
     /// Resets the decoder timestamp shift.
     ///
     /// If time shifting is disabled, this function should do nothing.
-    fn reset_timestamp_shift(&mut self, shift: usize);
+    fn reset_timestamp_shift(&mut self, shift: EventTimestamp);
 
     /// Returns true if the decoded events stream can be indexed.
     fn is_decoded_event_stream_indexable(&self) -> bool;

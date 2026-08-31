@@ -8,7 +8,7 @@
 //! - expose the base decoder error stream and raw-event size information
 
 use crate::hal::facilities::{
-    RawDecoderFacility, EventSubscriptionFacility, RawEventStreamDecoderFacility,
+    EventSubscriptionFacility, RawDecoderFacility, RawEventStreamDecoderFacility,
 };
 
 /// Trait alias for the decoder capabilities required by raw file readers.
