@@ -1,11 +1,19 @@
 use openevt::hal::device::discovery::PluginRegistry;
 use std::env;
+use std::path::PathBuf;
 
 #[test]
 fn configured_plugin_path_discovers_the_simulator() {
-    let configured_path = env::var_os("OPENEVT_PLUGIN_PATH")
-        .expect("OPENEVT_PLUGIN_PATH must point to the built plugin directory");
-    let configured_paths: Vec<_> = env::split_paths(&configured_path).collect();
+    let configured_paths: Vec<PathBuf> = match env::var_os("OPENEVT_PLUGIN_PATH") {
+        Some(configured_path) => env::split_paths(&configured_path).collect(),
+        None => vec![
+            env::current_exe()
+                .expect("test executable path should be available")
+                .parent()
+                .expect("test executable should have a parent directory")
+                .to_path_buf(),
+        ],
+    };
 
     assert!(
         configured_paths.iter().any(|path| path.is_dir()),
@@ -14,7 +22,10 @@ fn configured_plugin_path_discovers_the_simulator() {
     );
 
     let mut registry = PluginRegistry::new();
-    let loaded = registry.load_default_paths();
+    let loaded = configured_paths
+        .iter()
+        .map(|path| registry.load_directory(path))
+        .sum::<u64>();
     assert!(
         loaded > 0,
         "no plugin libraries could be loaded from {:?}",

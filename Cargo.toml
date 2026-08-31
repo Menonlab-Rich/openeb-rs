@@ -4,11 +4,11 @@ resolver = "3"
 
 [package]
 name = "openevt"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 authors = ["Rich Baird <rich@rbaird.me>"]
 description = "An independently maintained Rust implementation inspired by Prophesee's OpenEB event-camera abstractions"
-license = "MIT" # Choose an appropriate open-source license
+license = "MIT"
 repository = "https://github.com/richbai90/openevt"
 documentation = "https://docs.rs/openevt"
 exclude = [".ccls-cache"]
@@ -21,6 +21,9 @@ python = ["devices", "plugins", "dep:pyo3", "dep:numpy"]
 framegen = ["dep:abi_stable"]
 plugins = ["dep:abi_stable"]
 bundled-plugins = ["plugins"]
+# Suppress bundled root-module exports when this crate is linked into another
+# cdylib that exports its own abi_stable root module.
+library-link = []
 
 [dependencies]
 anyhow = "1.0.100"

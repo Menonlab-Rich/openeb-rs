@@ -16,21 +16,26 @@
 //! `start_events` subscribes to the CD receiver, `load_batch` decodes one raw
 //! buffer, and every batch produced by that decode is sent to the callback.
 
+#[cfg(not(feature = "library-link"))]
+use abi_stable::prefix_type::PrefixTypeTrait;
 use abi_stable::{
-    prefix_type::PrefixTypeTrait,
     std_types::{ROption, RResult, RString, RVec},
     type_level::downcasting::TD_Opaque,
 };
 use crossbeam::channel::Receiver;
 use std::sync::{Arc, Mutex};
 
+#[cfg(not(feature = "library-link"))]
 use crate::hal::device::configuration::PluginConfigurationSchema;
 use crate::hal::device::discovery::ConnectionType;
+#[cfg(not(feature = "library-link"))]
 use crate::hal::device::plugin::{
-    DeviceDiscoveryPlugin, DeviceDiscoveryPlugin_TO, DeviceDiscoveryPluginBox, DevicePlugin,
-    DevicePlugin_TO, DevicePluginBox, EventBatchSinkBox, PluginCameraDescriptionAbi,
-    PluginConfiguration, PluginFacility, PluginFacilityHandle, PluginFacilityType, PluginGeometry,
-    PluginGeometryFacility, PluginGeometryFacility_TO,
+    DeviceDiscoveryPlugin, DeviceDiscoveryPlugin_TO, DeviceDiscoveryPluginBox, DevicePlugin_TO,
+    DevicePluginBox, PluginCameraDescriptionAbi, PluginConfiguration,
+};
+use crate::hal::device::plugin::{
+    DevicePlugin, EventBatchSinkBox, PluginFacility, PluginFacilityHandle, PluginFacilityType,
+    PluginGeometry, PluginGeometryFacility, PluginGeometryFacility_TO,
 };
 use crate::hal::types::{EventCD, EventExtTrigger, EventTimestamp};
 use crate::raw::RawFileReader;
@@ -39,6 +44,7 @@ use crate::raw::RawFileReader;
 // callers can introduce a larger buffer as a versioned plugin policy.
 const BUFFER_SIZE: usize = 131_072;
 
+#[cfg(not(feature = "library-link"))]
 const RAW_FILE_CONFIGURATION_SCHEMA: &str = r#"
 version = 1
 
@@ -299,8 +305,10 @@ impl DevicePlugin for RawFilePlugin {
     }
 }
 
+#[cfg(not(feature = "library-link"))]
 struct RawFileDiscovery;
 
+#[cfg(not(feature = "library-link"))]
 impl DeviceDiscoveryPlugin for RawFileDiscovery {
     fn discover(&self) -> RVec<PluginCameraDescriptionAbi> {
         std::env::var_os("OPENEVT_RAW_FILES")
@@ -356,15 +364,18 @@ impl DeviceDiscoveryPlugin for RawFileDiscovery {
     }
 }
 
+#[cfg(not(feature = "library-link"))]
 extern "C" fn raw_plugin_name() -> RString {
     "openevt_raw_file".into()
 }
 
+#[cfg(not(feature = "library-link"))]
 extern "C" fn create_raw_discovery() -> DeviceDiscoveryPluginBox {
     DeviceDiscoveryPlugin_TO::from_value(RawFileDiscovery, TD_Opaque)
 }
 
 /// Root module constructor for building this module as a plugin cdylib.
+#[cfg(not(feature = "library-link"))]
 #[abi_stable::export_root_module]
 pub fn instantiate_root_module() -> crate::hal::device::plugin::DevicePluginModuleRef {
     crate::hal::device::plugin::DevicePluginModuleVtable {
