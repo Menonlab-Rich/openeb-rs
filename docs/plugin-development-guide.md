@@ -109,7 +109,7 @@ edition = "2024"
 
 [dependencies]
 abi_stable = "0.11.3"
-openevt = { version = "1.0.3", features = ["plugins"] }
+openevt = { version = "1.0.4", features = ["plugins"] }
 
 [lib]
 crate-type = ["cdylib"]
