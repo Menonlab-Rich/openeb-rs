@@ -4,14 +4,14 @@ resolver = "3"
 
 [package]
 name = "openevt"
-version = "1.0.2"
+version = "1.0.3"
 edition = "2024"
 authors = ["Rich Baird <rich@rbaird.me>"]
 description = "An independently maintained Rust implementation inspired by Prophesee's OpenEB event-camera abstractions"
 license = "MIT"
 repository = "https://github.com/richbai90/openevt"
 documentation = "https://docs.rs/openevt"
-exclude = [".ccls-cache"]
+exclude = [".ccls-cache", "openevt-plugins/tools/**"]
 
 [features]
 default = ["all"]

@@ -57,3 +57,34 @@ impl EvtProcessor for ActivityNoiseFilter {
         }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        algorithms::EvtProcessor,
+        types::{EventCD, EventTimestamp},
+    };
+
+    fn event(x: EventCoordinate, y: EventCoordinate, p: bool, t: EventTimestamp) -> EventCD {
+        EventCD::new(x, y, p, t)
+    }
+
+    #[test]
+    fn forwards_same_polarity_events_with_recent_neighbor_activity() {
+        let mut filter = ActivityNoiseFilter::new(4, 4, 10);
+        let events = vec![
+            event(1, 1, true, 100),
+            event(2, 2, true, 109),
+            event(3, 3, false, 110),
+            event(0, 0, true, 121),
+            event(0, 1, true, 125),
+        ];
+
+        let output: Vec<_> = filter
+            .process_events(Box::new(events.clone().into_iter()))
+            .collect();
+
+        assert_eq!(output, vec![events[1], events[4]]);
+    }
+}

@@ -23,3 +23,32 @@ impl EvtProcessor for RoiFilter {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn event(x: EventCoordinate, y: EventCoordinate) -> EventCD {
+        EventCD::new(x, y, true, x + y)
+    }
+
+    #[test]
+    fn forwards_only_events_strictly_inside_roi_bounds() {
+        let mut filter = RoiFilter::new(10, 20, 30, 40);
+        let events = vec![
+            event(10, 35),
+            event(11, 31),
+            event(20, 35),
+            event(19, 39),
+            event(19, 40),
+            event(9, 35),
+            event(15, 29),
+        ];
+
+        let output: Vec<_> = filter
+            .process_events(Box::new(events.clone().into_iter()))
+            .collect();
+
+        assert_eq!(output, vec![events[1], events[3]]);
+    }
+}

@@ -19,7 +19,7 @@ pub type EventCount = u64;
     any(feature = "framegen", feature = "plugins"),
     derive(abi_stable::StableAbi)
 )]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, new, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, new, Default, Hash)]
 #[cfg_attr(any(feature = "framegen", feature = "plugins"), repr(C))]
 /// A decoded change-detection event.
 pub struct EventCD {

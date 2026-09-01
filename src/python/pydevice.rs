@@ -4,7 +4,7 @@ use crate::hal::types::{EventCount, EventTimestamp};
 use crate::types::{DeviceFileError, EventCD};
 use abi_stable::{std_types::RSlice, type_level::downcasting::TD_Opaque};
 use crossbeam::channel::{Receiver, Sender};
-use numpy::{Element, PyArray1, PyArrayDescr};
+use numpy::{Element, PyArray1, PyArrayDescr, PyReadonlyArray1};
 use pyo3::{
     exceptions::{PyIOError, PyRuntimeError, PyValueError},
     prelude::*,
@@ -137,10 +137,27 @@ impl From<DeviceFileError> for PyErr {
 #[derive(Debug, Clone, Copy)]
 #[pyclass(from_py_object)]
 pub struct PyEventCD {
+    #[pyo3(get, set)]
     x: u64,
+    #[pyo3(get, set)]
     y: u64,
+    #[pyo3(get, set)]
     p: u8,
+    #[pyo3(get, set)]
     t: EventTimestamp,
+}
+
+#[pymethods]
+impl PyEventCD {
+    #[new]
+    fn new(x: u64, y: u64, p: bool, t: EventTimestamp) -> Self {
+        Self {
+            x,
+            y,
+            p: p.into(),
+            t,
+        }
+    }
 }
 
 impl From<EventCD> for PyEventCD {
@@ -151,6 +168,12 @@ impl From<EventCD> for PyEventCD {
             p: value.p.into(),
             t: value.t,
         }
+    }
+}
+
+impl From<PyEventCD> for EventCD {
+    fn from(value: PyEventCD) -> Self {
+        EventCD::new(value.x, value.y, value.p != 0, value.t)
     }
 }
 
@@ -268,8 +291,15 @@ impl PyCDEventReceiver {
     }
 }
 
-fn events_to_numpy<'py>(py: Python<'py>, events: Vec<EventCD>) -> Bound<'py, PyAny> {
+pub(crate) fn events_to_numpy<'py>(py: Python<'py>, events: Vec<EventCD>) -> Bound<'py, PyAny> {
     PyArray1::from_vec(py, events.iter().map(PyEventCD::from).collect::<Vec<_>>()).into_any()
+}
+
+pub(crate) fn events_from_numpy(events: PyReadonlyArray1<'_, PyEventCD>) -> PyResult<Vec<EventCD>> {
+    let slice = events
+        .as_slice()
+        .map_err(|_| PyValueError::new_err("events array must be contiguous"))?;
+    Ok(slice.iter().copied().map(EventCD::from).collect())
 }
 
 fn async_result<'py>(
@@ -524,6 +554,7 @@ impl PyRawFileReader {
 
 pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyEventCD>()?;
+    module.add("EventCD", module.getattr("PyEventCD")?)?;
     module.add_class::<PyCDEventReceiver>()?;
     module.add_class::<PyCDEventIterator>()?;
     module.add_class::<PyAsyncCDEventIterator>()?;

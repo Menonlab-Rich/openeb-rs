@@ -9,7 +9,7 @@ device support and the frame-generation plugin ABI are optional:
 
 ```toml
 [dependencies]
-openevt = { version = "0.1", features = ["devices"] }
+openevt = { version = "1.0.3", features = ["devices"] }
 ```
 
 The `all` feature enables every optional component and is the default feature.
