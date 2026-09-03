@@ -12,7 +12,6 @@ use abi_stable::{
     sabi_types::VersionStrings,
     std_types::{RBox, ROption, RResult, RSlice, RStr, RString, RVec},
 };
-use slotmap::DefaultKey;
 
 use super::discovery::ConnectionType;
 use crate::hal::types::{EventCD, EventExtTrigger, EventTimestamp, StreamLength};
