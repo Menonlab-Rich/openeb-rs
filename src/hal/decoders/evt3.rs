@@ -15,6 +15,7 @@ use crate::hal::facilities::{
 use crate::hal::types::{EventCD, EventExtTrigger, EventTimestamp};
 use log::warn;
 use macros::new;
+use slotmap::{DefaultKey, SlotMap};
 
 /// Decoder for the EVT3 event data format.
 ///
@@ -65,6 +66,8 @@ pub struct Evt3Decoder {
     pub max_y: u16,
     /// Previous high timestamp value, preserved for timing validation.
     prev_time_high: EventTimestamp,
+
+    markers: SlotMap<DefaultKey, u64>,
 }
 
 impl Default for Evt3Decoder {
@@ -92,6 +95,7 @@ impl Default for Evt3Decoder {
             max_x: 640,
             max_y: 480,
             prev_time_high: Default::default(),
+            markers: SlotMap::with_capacity(512),
         }
     }
 }
@@ -504,6 +508,13 @@ impl RawEventStreamDecoderFacility for Evt3Decoder {
         self.dispatch();
 
         Ok(())
+    }
+
+    fn add_marker(&mut self, timestamp: EventTimestamp) -> DefaultKey {
+        self.markers.insert(timestamp)
+    }
+    fn remove_marker(&mut self, key: DefaultKey) -> Option<u64> {
+        self.markers.remove(key)
     }
 
     /// Returns the last timestamp emitted by the decoder.

@@ -12,10 +12,11 @@ use abi_stable::{
     sabi_types::VersionStrings,
     std_types::{RBox, ROption, RResult, RSlice, RStr, RString, RVec},
 };
+use slotmap::DefaultKey;
 
 use super::discovery::ConnectionType;
-use crate::hal::facilities::FacilityType;
 use crate::hal::types::{EventCD, EventExtTrigger, EventTimestamp, StreamLength};
+use crate::hal::{facilities::FacilityType, types::FfiKey};
 
 /// One named plugin creation value.
 ///
@@ -446,6 +447,8 @@ pub trait PluginRawEventStreamDecoderFacility: Send + Sync {
     fn reset_timestamp_shift(&mut self, shift: EventTimestamp);
     /// Reports whether timestamp indexing is supported.
     fn is_decoded_event_stream_indexable(&self) -> bool;
+    fn add_marker(&mut self, timestamp: EventTimestamp) -> FfiKey;
+    fn remove_marker(&mut self, key: FfiKey) -> ROption<EventTimestamp>;
 }
 
 /// ABI-safe boxed raw event-stream decoder.

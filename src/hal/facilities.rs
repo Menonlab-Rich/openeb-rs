@@ -25,6 +25,7 @@ use crate::hal::errors::{
 use crate::hal::types::{CallbackId, Cb, CbRo, EventTimestamp, PixelMask, Region, StreamLength};
 use crate::hal::types::{EventCD, EventExtTrigger};
 pub use macros::pack_facility;
+use slotmap::DefaultKey;
 use std::sync::{Arc, RwLock};
 use thiserror::Error;
 
@@ -579,6 +580,13 @@ pub trait RawEventStreamDecoderFacility: RawDecoderFacility + BaseFacility {
 
     /// Returns true if the decoded events stream can be indexed.
     fn is_decoded_event_stream_indexable(&self) -> bool;
+
+    /// Add a marker to the event stream
+    fn add_marker(&mut self, timestamp: EventTimestamp) -> DefaultKey;
+
+    /// Remove a marker from the event stream
+    /// Returns the marker ID if removal was successful
+    fn remove_marker(&mut self, key: DefaultKey) -> Option<EventTimestamp>;
 }
 
 /// Exposes the sensor geometry.

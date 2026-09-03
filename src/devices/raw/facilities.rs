@@ -19,21 +19,11 @@ use std::sync::Arc;
 /// Raw files do not contain mutable camera ROI state. This implementation keeps
 /// ROI values as local reader state so clients can use the common facility API
 /// while processing a file.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct RawReaderROI {
     enabled: bool,
     roi_: Option<Region>,
     rois_: Option<Vec<Region>>,
-}
-
-impl Default for RawReaderROI {
-    fn default() -> Self {
-        Self {
-            enabled: Default::default(),
-            roi_: Default::default(),
-            rois_: Default::default(),
-        }
-    }
 }
 
 impl ROIFacility for RawReaderROI {

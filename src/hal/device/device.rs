@@ -36,10 +36,12 @@ mod plugin_adapter {
         SensorInfo, StreamBuffer, SystemInfo,
     };
     use crate::hal::types::EventTimestamp;
+    use abi_stable::std_types::ROption;
     use abi_stable::{
         std_types::{RSlice, RString},
         type_level::downcasting::TD_Opaque,
     };
+    use slotmap::DefaultKey;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
@@ -305,6 +307,14 @@ mod plugin_adapter {
         }
         fn is_decoded_event_stream_indexable(&self) -> bool {
             self.decoder.is_decoded_event_stream_indexable()
+        }
+
+        fn add_marker(&mut self, timestamp: EventTimestamp) -> slotmap::DefaultKey {
+            self.decoder.add_marker(timestamp).into()
+        }
+
+        fn remove_marker(&mut self, key: DefaultKey) -> Option<EventTimestamp> {
+            self.decoder.remove_marker(key.into()).into()
         }
     }
 

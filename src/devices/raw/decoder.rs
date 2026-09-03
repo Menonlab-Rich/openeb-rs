@@ -104,6 +104,14 @@ impl RawEventStreamDecoderFacility for RawEventStreamDecoder {
             .unwrap()
             .is_decoded_event_stream_indexable()
     }
+
+    fn add_marker(&mut self, timestamp: EventTimestamp) -> slotmap::DefaultKey {
+        self.inner.write().unwrap().add_marker(timestamp)
+    }
+
+    fn remove_marker(&mut self, key: slotmap::DefaultKey) -> Option<EventTimestamp> {
+        self.inner.write().unwrap().remove_marker(key)
+    }
 }
 
 impl RawDecoderFacility for RawEventStreamDecoder {

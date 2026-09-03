@@ -6,6 +6,8 @@
 
 use std::sync::Arc;
 
+use slotmap::{DefaultKey, SlotMap};
+
 use crate::hal::dispatcher::{ErrorDispatcher, EventDispatcher};
 use crate::hal::facilities::{
     DecoderErrorCallback, EventCDCallback, EventExtTriggerCallback, EventSubscriptionFacility,
@@ -37,6 +39,9 @@ pub struct Evt2Decoder {
     split_bytes: Vec<u8>,
     cd_buffer: Vec<EventCD>,
     ext_trigger_buffer: Vec<EventExtTrigger>,
+
+    // markers
+    markers: SlotMap<DefaultKey, EventTimestamp>,
 }
 
 impl Evt2Decoder {
@@ -63,6 +68,7 @@ impl Evt2Decoder {
             split_bytes: Vec::with_capacity(4),
             cd_buffer: Vec::with_capacity(Self::BATCH_SIZE),
             ext_trigger_buffer: Vec::with_capacity(Self::BATCH_SIZE),
+            markers: SlotMap::with_capacity(512),
         }
     }
 
@@ -212,6 +218,14 @@ impl RawEventStreamDecoderFacility for Evt2Decoder {
     /// EVT2 streams are not currently treated as indexable.
     fn is_decoded_event_stream_indexable(&self) -> bool {
         false
+    }
+
+    fn add_marker(&mut self, timestamp: EventTimestamp) -> slotmap::DefaultKey {
+        self.markers.insert(timestamp)
+    }
+
+    fn remove_marker(&mut self, key: slotmap::DefaultKey) -> Option<EventTimestamp> {
+        self.markers.remove(key)
     }
 }
 

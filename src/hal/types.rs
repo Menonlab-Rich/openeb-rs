@@ -2,6 +2,9 @@
 
 use crate::new;
 
+use abi_stable::StableAbi;
+use slotmap::{DefaultKey, Key, KeyData};
+
 /// Fixed-width scalar used for decoded event coordinates.
 pub type EventCoordinate = u64;
 /// Fixed-width scalar used for event timestamps in device time units.
@@ -78,5 +81,27 @@ impl PixelMask {
     /// Disables the pixel.
     pub fn disable(&mut self) {
         self.enabled = false;
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, StableAbi)]
+pub struct FfiKey {
+    pub data: u64,
+}
+
+impl From<DefaultKey> for FfiKey {
+    #[inline]
+    fn from(key: DefaultKey) -> Self {
+        Self {
+            data: key.data().as_ffi(),
+        }
+    }
+}
+
+impl From<FfiKey> for DefaultKey {
+    #[inline]
+    fn from(ffi_key: FfiKey) -> Self {
+        KeyData::from_ffi(ffi_key.data).into()
     }
 }
